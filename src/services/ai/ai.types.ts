@@ -6,6 +6,7 @@ export interface TokenUsage {
 
 export interface AiGenerateOptions {
   apiKey?: string;
+  apiKeys?: string[];
   systemPrompt?: string;
   userMessage: string;
   model?: 'pro' | 'flash' | string;
@@ -20,6 +21,7 @@ export interface AiGenerateResult {
   usage: TokenUsage;
   model: string;
   durationMs: number;
+  keyUsed?: string;
 }
 
 export interface ApiKeyValidationResult {
@@ -27,3 +29,21 @@ export interface ApiKeyValidationResult {
   message: string;
   maskedKey?: string;
 }
+
+export interface KeyTestDetail {
+  key: string;
+  maskedKey: string;
+  isValid: boolean;
+  status: 'ACTIVE' | 'QUOTA_EXHAUSTED' | 'INVALID' | 'NETWORK_ERROR';
+  message: string;
+  modelTested?: string;
+}
+
+export interface MultiKeyTestResult {
+  success: boolean;
+  totalKeys: number;
+  activeKeys: number;
+  message: string;
+  details: KeyTestDetail[];
+}
+

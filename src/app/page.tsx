@@ -2,6 +2,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { ApiKeyService } from '@/services/ai/api-key.service';
+import type { MultiKeyTestResult } from '@/services/ai/ai.types';
 
 const COMMANDS = [
   { id: 'KHOI_DONG', label: '🚀 Khởi động', desc: 'Lập chỉ mục nguồn & kiểm tra hệ thống' },
@@ -25,6 +26,7 @@ interface OutputData {
   };
   model?: string;
   duration_ms?: number;
+  key_used?: string;
 }
 
 export default function Home() {
@@ -36,61 +38,74 @@ export default function Home() {
   const [outputData, setOutputData] = useState<OutputData | null>(null);
   const [pipelineStep, setPipelineStep] = useState<string>('');
 
-  // Settings Modal State
+  // Multi-Key State
   const [showSettings, setShowSettings] = useState(false);
-  const [tempKey, setTempKey] = useState('');
+  const [rawKeysInput, setRawKeysInput] = useState('');
   const [rememberKey, setRememberKey] = useState(false);
   const [testingKey, setTestingKey] = useState(false);
-  const [keyTestMessage, setKeyTestMessage] = useState<{ success: boolean; text: string } | null>(null);
-  const [isKeyConfigured, setIsKeyConfigured] = useState(false);
+  const [multiKeyResult, setMultiKeyResult] = useState<MultiKeyTestResult | null>(null);
+  const [configuredKeyCount, setConfiguredKeyCount] = useState(0);
 
   const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    const key = ApiKeyService.getClientKey();
-    if (key) {
-      setTempKey(key);
-      setIsKeyConfigured(true);
+    const keys = ApiKeyService.getClientKeys();
+    if (keys.length > 0) {
+      setRawKeysInput(keys.join('\n'));
+      setConfiguredKeyCount(keys.length);
     }
   }, []);
 
-  const handleTestKey = async () => {
-    if (!tempKey.trim()) {
-      setKeyTestMessage({ success: false, text: 'Vui lòng nhập API Key để kiểm tra.' });
+  const currentParsedKeys = ApiKeyService.parseKeys(rawKeysInput);
+
+  const handleTestKeys = async () => {
+    if (currentParsedKeys.length === 0) {
+      setMultiKeyResult({
+        success: false,
+        totalKeys: 0,
+        activeKeys: 0,
+        message: 'Vui lòng nhập ít nhất 1 Google AI API Key để kiểm tra.',
+        details: [],
+      });
       return;
     }
 
     setTestingKey(true);
-    setKeyTestMessage(null);
+    setMultiKeyResult(null);
 
     try {
       const res = await fetch('/api/test-key', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiKey: tempKey.trim() }),
+        body: JSON.stringify({ apiKeys: currentParsedKeys }),
       });
 
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setKeyTestMessage({ success: true, text: data.message || '✅ Kết nối Google AI thành công!' });
-        setIsKeyConfigured(true);
-      } else {
-        setKeyTestMessage({ success: false, text: '❌ ' + (data.message || 'API Key không hợp lệ.') });
+      const data: MultiKeyTestResult = await res.json();
+      setMultiKeyResult(data);
+
+      if (data.activeKeys > 0) {
+        setConfiguredKeyCount(currentParsedKeys.length);
       }
     } catch {
-      setKeyTestMessage({ success: false, text: '❌ Không thể kết nối đến máy chủ API.' });
+      setMultiKeyResult({
+        success: false,
+        totalKeys: currentParsedKeys.length,
+        activeKeys: 0,
+        message: 'Không thể kết nối đến máy chủ kiểm tra API Key.',
+        details: [],
+      });
     } finally {
       setTestingKey(false);
     }
   };
 
   const handleSaveSettings = () => {
-    if (tempKey.trim()) {
-      ApiKeyService.saveClientKey(tempKey.trim(), rememberKey);
-      setIsKeyConfigured(true);
+    if (currentParsedKeys.length > 0) {
+      ApiKeyService.saveClientKeys(currentParsedKeys, rememberKey);
+      setConfiguredKeyCount(currentParsedKeys.length);
     } else {
-      ApiKeyService.clearClientKey();
-      setIsKeyConfigured(false);
+      ApiKeyService.clearClientKeys();
+      setConfiguredKeyCount(0);
     }
     setShowSettings(false);
   };
@@ -117,10 +132,10 @@ export default function Home() {
     abortControllerRef.current = controller;
 
     try {
-      const activeKey = tempKey.trim() || ApiKeyService.getClientKey();
+      const activeKeys = currentParsedKeys.length > 0 ? currentParsedKeys : ApiKeyService.getClientKeys();
       const jobId = `JOB-${Date.now()}`;
 
-      setPipelineStep('Đang khởi chạy Agent & xây dựng KHDH...');
+      setPipelineStep('Đang điều phối Agent & thực thi (Xoay vòng Key tự động)...');
 
       const res = await fetch('/api/generate-khdh', {
         method: 'POST',
@@ -129,7 +144,7 @@ export default function Home() {
           command: command.trim(),
           lessonCode: lessonCode.trim(),
           jobId,
-          apiKey: activeKey,
+          apiKeys: activeKeys,
         }),
         signal: controller.signal,
       });
@@ -201,13 +216,23 @@ export default function Home() {
           <button
             onClick={() => setShowSettings(true)}
             className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold border transition-all ${
-              isKeyConfigured
-                ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
-                : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
+              configuredKeyCount > 1
+                ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
+                : configuredKeyCount === 1
+                ? 'bg-blue-50 text-blue-800 border-blue-300 hover:bg-blue-100'
+                : 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100'
             }`}
           >
-            <span>{isKeyConfigured ? '🟢 API Key: Đã lưu' : '🟡 API Key: Chưa nhập'}</span>
-            <span className="text-xs bg-white px-2 py-0.5 rounded-lg border border-slate-200">Cấu hình</span>
+            <span>
+              {configuredKeyCount > 1
+                ? `🟢 ${configuredKeyCount} Keys (Luân phiên & Dự phòng)`
+                : configuredKeyCount === 1
+                ? '🟢 1 Key Đang Hoạt Động'
+                : '🟡 Cấu Hình API Key'}
+            </span>
+            <span className="text-xs bg-white px-2 py-0.5 rounded-lg border border-slate-200 shadow-xs">
+              Quản lý
+            </span>
           </button>
         </div>
       </header>
@@ -218,13 +243,13 @@ export default function Home() {
           <div className="flex gap-2">
             <span className="text-lg">⚠️</span>
             <div>
-              <p className="font-semibold">Thông báo lỗi:</p>
+              <p className="font-semibold">Thông báo:</p>
               <p className="mt-0.5">{error}</p>
             </div>
           </div>
           <button
             onClick={() => setError(null)}
-            className="text-rose-500 hover:text-rose-700 text-lg leading-none"
+            className="text-rose-500 hover:text-rose-700 text-lg leading-none font-bold"
           >
             ✕
           </button>
@@ -329,11 +354,17 @@ export default function Home() {
           {/* System Info Card */}
           <div className="card text-xs text-slate-600 space-y-2 bg-slate-50/50">
             <div className="font-bold text-slate-800 flex items-center gap-1.5">
-              <span>ℹ️</span> Thông tin cấu hình
+              <span>ℹ️</span> Thông tin cấu hình hệ thống
             </div>
             <div className="flex justify-between">
-              <span>Mô hình mặc định:</span>
-              <span className="font-semibold text-slate-800">Gemini 3.8 Flash (Auto Cascade)</span>
+              <span>Mô hình ưu tiên:</span>
+              <span className="font-semibold text-slate-800">Gemini Flash (Cascade Auto)</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Cơ chế API Key:</span>
+              <span className="font-semibold text-blue-700">
+                {configuredKeyCount > 1 ? `Multi-Key (${configuredKeyCount} keys xoay vòng)` : 'Single Key'}
+              </span>
             </div>
             <div className="flex justify-between">
               <span>Định dạng bảng:</span>
@@ -355,7 +386,7 @@ export default function Home() {
                 { id: 'draft', label: '📝 Bản Thảo KHDH' },
                 { id: 'preview', label: '📐 Xem Trước 2 Cột' },
                 { id: 'slide', label: '📊 Slide & Canva' },
-                { id: 'stats', label: '📈 Thống Kê' },
+                { id: 'stats', label: '📈 Thống Kê & Key' },
               ].map((tab) => (
                 <button
                   key={tab.id}
@@ -456,6 +487,7 @@ export default function Home() {
                       <div className="p-3 bg-slate-50 border rounded-xl space-y-1">
                         <div><span className="font-semibold">Mã Job:</span> {outputData.job_id}</div>
                         <div><span className="font-semibold">Mô hình AI:</span> {outputData.model}</div>
+                        <div><span className="font-semibold">Key đã sử dụng:</span> <code className="bg-slate-200 px-1.5 py-0.5 rounded font-bold text-slate-700">{outputData.key_used || 'Mặc định'}</code></div>
                         <div><span className="font-semibold">Lệnh thực thi:</span> {outputData.command}</div>
                       </div>
                     </div>
@@ -490,14 +522,19 @@ export default function Home() {
         </div>
       </div>
 
-      {/* API Key Modal */}
+      {/* Multi-Key Settings Modal */}
       {showSettings && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-white max-w-md w-full rounded-2xl p-6 shadow-2xl border border-slate-200 space-y-4">
+          <div className="bg-white max-w-lg w-full rounded-2xl p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b pb-3">
-              <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                <span>🔐</span> Cấu Hình Google AI API Key
-              </h3>
+              <div>
+                <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                  <span>🔐</span> Cấu Hình Danh Sách Google AI API Keys
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Hỗ trợ nhập nhiều key – tự động xoay vòng và dự phòng khi hết hạn mức
+                </p>
+              </div>
               <button
                 onClick={() => setShowSettings(false)}
                 className="text-slate-400 hover:text-slate-600 font-bold text-lg"
@@ -507,18 +544,30 @@ export default function Home() {
             </div>
 
             <div className="space-y-3 text-xs text-slate-600">
-              <p>
-                Nhập Google Gemini API Key để thực thi các tác vụ tạo KHDH. API Key của bạn được lưu an toàn trong trình duyệt (sessionStorage) và chỉ gửi trực tiếp đến endpoint xử lý.
-              </p>
+              <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-xl text-blue-900 space-y-1">
+                <p className="font-semibold flex items-center gap-1">
+                  <span>💡</span> Mẹo sử dụng Multi-Key:
+                </p>
+                <p>
+                  Bạn có thể dán <strong>nhiều API Keys</strong> (mỗi key trên 1 dòng hoặc cách nhau bằng dấu phẩy). Hệ thống sẽ tự động luân phiên (Round-Robin) và tự chuyển sang Key tiếp theo nếu Key trước hết Quota trong ngày.
+                </p>
+              </div>
 
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Google AI API Key:</label>
-                <input
-                  type="password"
-                  value={tempKey}
-                  onChange={(e) => setTempKey(e.target.value)}
-                  placeholder="AIzaSy..."
-                  className="input-field font-mono text-sm"
+                <div className="flex justify-between items-center mb-1">
+                  <label className="font-semibold text-slate-700">
+                    Danh sách Google AI API Keys:
+                  </label>
+                  <span className="text-xs font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full">
+                    {currentParsedKeys.length} Key hợp lệ
+                  </span>
+                </div>
+                <textarea
+                  rows={4}
+                  value={rawKeysInput}
+                  onChange={(e) => setRawKeysInput(e.target.value)}
+                  placeholder={`AIzaSyKey1...\nAIzaSyKey2...\nAIzaSyKey3...`}
+                  className="input-field font-mono text-xs leading-relaxed"
                 />
               </div>
 
@@ -531,30 +580,78 @@ export default function Home() {
                   className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                 />
                 <label htmlFor="remember-key" className="text-slate-700 font-medium cursor-pointer">
-                  Ghi nhớ key trên thiết bị này (localStorage)
+                  Ghi nhớ danh sách key trên thiết bị này (localStorage)
                 </label>
               </div>
 
-              {keyTestMessage && (
-                <div
-                  className={`p-3 rounded-lg text-xs font-semibold ${
-                    keyTestMessage.success
-                      ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                      : 'bg-rose-50 text-rose-800 border border-rose-200'
-                  }`}
-                >
-                  {keyTestMessage.text}
+              {/* Multi-Key Test Results */}
+              {multiKeyResult && (
+                <div className="space-y-2 pt-2 border-t">
+                  <div
+                    className={`p-3 rounded-xl text-xs font-semibold ${
+                      multiKeyResult.success
+                        ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                        : 'bg-rose-50 text-rose-800 border border-rose-200'
+                    }`}
+                  >
+                    {multiKeyResult.message}
+                  </div>
+
+                  {multiKeyResult.details.length > 0 && (
+                    <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                      {multiKeyResult.details.map((d, idx) => (
+                        <div
+                          key={idx}
+                          className="flex items-center justify-between p-2 bg-slate-50 border rounded-lg text-xs"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span>
+                              {d.status === 'ACTIVE'
+                                ? '🟢'
+                                : d.status === 'QUOTA_EXHAUSTED'
+                                ? '🟡'
+                                : '🔴'}
+                            </span>
+                            <span className="font-mono font-bold text-slate-800">
+                              {d.maskedKey}
+                            </span>
+                          </div>
+                          <span
+                            className={`text-xs ${
+                              d.status === 'ACTIVE'
+                                ? 'text-emerald-700 font-medium'
+                                : d.status === 'QUOTA_EXHAUSTED'
+                                ? 'text-amber-700 font-medium'
+                                : 'text-rose-700 font-medium'
+                            }`}
+                          >
+                            {d.message}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
 
             <div className="flex items-center justify-between border-t pt-4 gap-2">
               <button
-                onClick={handleTestKey}
-                disabled={testingKey || !tempKey.trim()}
-                className="btn-secondary text-xs"
+                onClick={handleTestKeys}
+                disabled={testingKey || currentParsedKeys.length === 0}
+                className="btn-secondary text-xs flex items-center gap-1.5"
               >
-                {testingKey ? 'Đang kiểm tra...' : 'Kiểm tra kết nối'}
+                {testingKey ? (
+                  <>
+                    <span className="animate-spin inline-block w-3 h-3 border-2 border-slate-600 border-t-transparent rounded-full" />
+                    <span>Đang kiểm tra {currentParsedKeys.length} keys...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>🔍</span>
+                    <span>Kiểm tra tất cả Key</span>
+                  </>
+                )}
               </button>
 
               <div className="flex gap-2">

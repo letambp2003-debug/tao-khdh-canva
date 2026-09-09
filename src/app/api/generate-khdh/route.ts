@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json().catch(() => ({}));
-    const { command, lessonCode, jobId, apiKey } = body;
+    const { command, lessonCode, jobId, apiKey, apiKeys } = body;
 
     if (!command || typeof command !== 'string') {
       return NextResponse.json(
@@ -29,12 +29,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const resolvedApiKey = GeminiService.resolveApiKey(apiKey);
-    if (!resolvedApiKey) {
+    const keyPool = GeminiService.resolveKeyPool(apiKey, apiKeys);
+    if (keyPool.length === 0) {
       return NextResponse.json(
         {
           error: 'MISSING_API_KEY',
-          message: 'Chưa cấu hình Google AI API Key. Vui lòng nhập API Key của bạn trên giao diện hoặc trong .env.local',
+          message: 'Chưa cấu hình Google AI API Key. Vui lòng nhập API Key trên giao diện hoặc trong .env.local',
         },
         { status: 401 }
       );
@@ -82,7 +82,7 @@ export async function POST(request: NextRequest) {
     ].join('\n');
 
     const result = await GeminiService.generateContent({
-      apiKey: resolvedApiKey,
+      apiKeys: keyPool,
       systemPrompt,
       userMessage,
       model: 'pro',
@@ -97,6 +97,7 @@ export async function POST(request: NextRequest) {
       token_usage: result.usage,
       model: result.model,
       duration_ms: result.durationMs,
+      key_used: result.keyUsed,
     });
   } catch (error) {
     const errStr = String(error);

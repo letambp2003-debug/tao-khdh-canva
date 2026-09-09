@@ -11,12 +11,11 @@ export interface LegacyCallAgentOptions {
 }
 
 export async function callAgent(options: LegacyCallAgentOptions) {
-  const modelName = GeminiService.resolveModelName(options.model, options.agentName);
   const result = await GeminiService.generateContent({
     apiKey: options.apiKey,
     systemPrompt: options.systemPrompt,
     userMessage: options.userMessage,
-    model: modelName,
+    model: options.model,
     maxTokens: options.maxTokens,
     temperature: options.temperature,
   });
