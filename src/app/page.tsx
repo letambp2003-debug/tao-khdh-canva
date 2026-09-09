@@ -73,6 +73,8 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [outputData, setOutputData] = useState<OutputData | null>(null);
   const [pipelineStep, setPipelineStep] = useState<string>('');
+  const [exportingWord, setExportingWord] = useState(false);
+  const [showWordMenu, setShowWordMenu] = useState(false);
 
   // Multi-Key State
   const [showSettings, setShowSettings] = useState(false);
@@ -376,6 +378,52 @@ export default function Home() {
     if (!outputData?.khdh_draft) return;
     navigator.clipboard.writeText(outputData.khdh_draft);
     alert('Đã sao chép nội dung vào Clipboard!');
+  };
+
+  
+  const handleDownloadWord = async (mathMode: 'omml' | 'latex' = 'omml') => {
+    if (!outputData?.khdh_draft) return;
+
+    setExportingWord(true);
+    try {
+      const res = await fetch('/api/export/word', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          markdown: outputData.khdh_draft,
+          title: 'Kế hoạch bài dạy',
+          lessonCode: outputData.lesson_code || 'TOAN-8',
+          mathMode,
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error('Không thể tạo file Word. Vui lòng thử lại.');
+      }
+
+      const blob = await res.blob();
+      const contentDisposition = res.headers.get('Content-Disposition') || '';
+      let filename = `KHDH_${outputData.lesson_code || 'V10'}_${mathMode.toUpperCase()}_${Date.now()}.docx`;
+      
+      const match = contentDisposition.match(/filename="?([^"]+)"?/);
+      if (match && match[1]) {
+        filename = decodeURIComponent(match[1]);
+      }
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err: unknown) {
+      const msg = (err as Error)?.message || 'Không thể tạo file Word. Vui lòng thử lại.';
+      setError(msg);
+    } finally {
+      setExportingWord(false);
+    }
   };
 
   const handleDownload = () => {
@@ -992,7 +1040,7 @@ export default function Home() {
                 <span className="text-xs text-slate-500">
                   Job ID: <code className="font-semibold">{outputData.job_id}</code>
                 </span>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <button
                     onClick={handleCopy}
                     className="btn-secondary text-xs flex items-center gap-1.5"
@@ -1001,10 +1049,66 @@ export default function Home() {
                   </button>
                   <button
                     onClick={handleDownload}
-                    className="btn-primary text-xs flex items-center gap-1.5"
+                    className="px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-200/70 border border-slate-300 rounded-lg flex items-center gap-1.5 transition-all shadow-2xs"
                   >
                     <span>⬇️</span> Tải file (.md)
                   </button>
+
+                  {/* Word Download Dropdown */}
+                  <div className="relative inline-block text-left">
+                    <button
+                      onClick={() => setShowWordMenu(!showWordMenu)}
+                      disabled={exportingWord}
+                      className="btn-primary text-xs flex items-center gap-1.5 bg-blue-700 hover:bg-blue-800 text-white font-bold py-2 px-3.5 rounded-lg shadow-sm transition-all"
+                    >
+                      {exportingWord ? (
+                        <>
+                          <span className="animate-spin inline-block w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full" />
+                          <span>Đang tạo Word...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>📥</span>
+                          <span>Tải xuống Word ▼</span>
+                        </>
+                      )}
+                    </button>
+
+                    {showWordMenu && !exportingWord && (
+                      <div className="absolute right-0 bottom-full mb-2 w-72 bg-white rounded-2xl shadow-2xl border border-slate-200 z-50 p-2 space-y-1.5 text-xs animate-in fade-in zoom-in-95 duration-100">
+                        <button
+                          onClick={() => {
+                            setShowWordMenu(false);
+                            handleDownloadWord('omml');
+                          }}
+                          className="w-full text-left p-2.5 hover:bg-blue-50 rounded-xl transition-all flex flex-col gap-0.5 group border border-transparent hover:border-blue-200"
+                        >
+                          <div className="font-bold text-blue-900 flex items-center gap-1.5">
+                            <span>✓</span> Word chuẩn OMML
+                            <span className="text-[10px] bg-blue-100 text-blue-800 px-1.5 py-0.2 rounded font-bold">Khuyến nghị</span>
+                          </div>
+                          <p className="text-[11px] text-slate-500 group-hover:text-blue-700 leading-tight">
+                            Công thức toán chuyển thành Equation Object, chỉnh sửa trực tiếp trong Microsoft Word
+                          </p>
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            setShowWordMenu(false);
+                            handleDownloadWord('latex');
+                          }}
+                          className="w-full text-left p-2.5 hover:bg-slate-50 rounded-xl transition-all flex flex-col gap-0.5 group border border-transparent hover:border-slate-200"
+                        >
+                          <div className="font-bold text-slate-800 flex items-center gap-1.5">
+                            <span>📄</span> Word giữ công thức LaTeX
+                          </div>
+                          <p className="text-[11px] text-slate-500 group-hover:text-slate-700 leading-tight">
+                            Giữ nguyên mã công thức gốc ($...$) để dễ copy và tái sử dụng
+                          </p>
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
