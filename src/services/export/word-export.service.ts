@@ -1,5 +1,6 @@
 import { Packer } from 'docx';
 import { DocxBuilder } from './docx-builder';
+import { ContentNormalizer } from './content-normalizer';
 import { WordExportOptions, WordExportResult } from './export.types';
 
 export class WordExportService {
@@ -14,20 +15,32 @@ export class WordExportService {
   public static async exportToDocx(options: WordExportOptions): Promise<WordExportResult> {
     const startTime = Date.now();
     const mathMode = options.mathMode || 'omml';
-    const builder = new DocxBuilder(mathMode);
+    const printProfile = options.printProfile || 'COMPACT_PRINT';
 
-    const doc = builder.build(options);
+    // 1. Chuẩn hóa nội dung văn bản (loại bỏ câu thừa chatbot, chuẩn hóa khoảng trắng)
+    const cleanMarkdown = ContentNormalizer.normalize(options.markdown);
+
+    // 2. Khởi tạo Builder với Profile & MathMode
+    const builder = new DocxBuilder(mathMode, printProfile);
+    const doc = builder.build({
+      ...options,
+      markdown: cleanMarkdown,
+    });
+
+    // 3. Đóng gói DOCX buffer
     const buffer = await Packer.toBuffer(doc);
 
     const dateStr = new Date().toISOString().slice(0, 10);
     const rawLesson = options.lessonCode || options.title || 'KHDH_V10';
     const safeCode = this.sanitizeFileName(rawLesson);
-    const filename = `KHDH_${safeCode}_${mathMode.toUpperCase()}_${dateStr}.docx`;
+    const profileSuffix = printProfile === 'COMPACT_PRINT' ? 'COMPACT' : 'STD';
+    const filename = `KHDH_${safeCode}_${mathMode.toUpperCase()}_${profileSuffix}_${dateStr}.docx`;
 
     return {
       buffer,
       filename,
       mathMode,
+      printProfile,
       formulasConverted: builder.formulasConverted,
       ommlFallbackCount: builder.ommlFallbackCount,
       tablesCount: builder.tablesCount,

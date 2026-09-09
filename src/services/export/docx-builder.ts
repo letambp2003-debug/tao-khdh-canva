@@ -11,9 +11,13 @@ import {
   AlignmentType,
   ShadingType,
   ImportedXmlComponent,
+  Footer,
+  PageNumber,
+  NumberFormat,
 } from 'docx';
 import { OmmlConverter } from './omml-converter';
-import { MathExportMode, WordExportOptions } from './export.types';
+import { MathExportMode, PrintProfile, ProfileConfig, WordExportOptions } from './export.types';
+import { PROFILES } from './word-export.config';
 
 interface Segment {
   type: 'text' | 'inline-math' | 'display-math';
@@ -25,7 +29,6 @@ function parseLineSegments(line: string): Segment[] {
   let cursor = 0;
 
   while (cursor < line.length) {
-    // Check for display math $$...$$
     if (line.startsWith('$$', cursor)) {
       const end = line.indexOf('$$', cursor + 2);
       if (end !== -1) {
@@ -36,7 +39,6 @@ function parseLineSegments(line: string): Segment[] {
       }
     }
 
-    // Check for inline math $...$
     if (line[cursor] === '$' && (cursor === 0 || line[cursor - 1] !== '\\')) {
       const end = line.indexOf('$', cursor + 1);
       if (end !== -1 && end > cursor + 1) {
@@ -47,7 +49,6 @@ function parseLineSegments(line: string): Segment[] {
       }
     }
 
-    // Regular text
     let nextMath = line.indexOf('$', cursor);
     if (nextMath === -1) nextMath = line.length;
 
@@ -63,17 +64,20 @@ function parseLineSegments(line: string): Segment[] {
 
 export class DocxBuilder {
   private mathMode: MathExportMode;
+  private profile: ProfileConfig;
   public formulasConverted = 0;
   public ommlFallbackCount = 0;
   public tablesCount = 0;
 
-  constructor(mathMode: MathExportMode = 'omml') {
+  constructor(mathMode: MathExportMode = 'omml', printProfile: PrintProfile = 'COMPACT_PRINT') {
     this.mathMode = mathMode;
+    this.profile = PROFILES[printProfile] || PROFILES.COMPACT_PRINT;
   }
 
-  private buildParagraphChildren(line: string): (TextRun | ImportedXmlComponent)[] {
+  private buildParagraphChildren(line: string, fontSize?: number): (TextRun | ImportedXmlComponent)[] {
     const segments = parseLineSegments(line);
     const children: (TextRun | ImportedXmlComponent)[] = [];
+    const targetSize = fontSize || this.profile.bodyFontSize;
 
     for (const seg of segments) {
       if (seg.type === 'inline-math') {
@@ -86,9 +90,10 @@ export class DocxBuilder {
           children.push(
             new TextRun({
               text: `$${seg.content}$`,
-              font: 'Cambria Math',
-              color: '1E3A8A',
+              font: this.profile.mathFontFamily,
+              color: '000000',
               bold: true,
+              size: targetSize,
             })
           );
         }
@@ -102,14 +107,14 @@ export class DocxBuilder {
           children.push(
             new TextRun({
               text: `$$ ${seg.content} $$`,
-              font: 'Cambria Math',
-              color: '1E3A8A',
+              font: this.profile.mathFontFamily,
+              color: '000000',
               bold: true,
+              size: targetSize,
             })
           );
         }
       } else {
-        // Parse inline bold / italic / text
         let raw = seg.content;
         const parts = raw.split(/(\*\*.*?\*\*|\*.*?\*)/g);
         for (const p of parts) {
@@ -119,8 +124,9 @@ export class DocxBuilder {
               new TextRun({
                 text: p.slice(2, -2),
                 bold: true,
-                font: 'Times New Roman',
-                size: 26,
+                font: this.profile.fontFamily,
+                size: targetSize,
+                color: '000000',
               })
             );
           } else if (p.startsWith('*') && p.endsWith('*') && p.length >= 2) {
@@ -128,16 +134,18 @@ export class DocxBuilder {
               new TextRun({
                 text: p.slice(1, -1),
                 italics: true,
-                font: 'Times New Roman',
-                size: 26,
+                font: this.profile.fontFamily,
+                size: targetSize,
+                color: '000000',
               })
             );
           } else {
             children.push(
               new TextRun({
                 text: p,
-                font: 'Times New Roman',
-                size: 26,
+                font: this.profile.fontFamily,
+                size: targetSize,
+                color: '000000',
               })
             );
           }
@@ -151,20 +159,21 @@ export class DocxBuilder {
   public build(options: WordExportOptions): Document {
     const docElements: (Paragraph | Table)[] = [];
 
-    // Header: School & Department
+    // 1. Header (School & Department) - Compact publication style
     docElements.push(
       new Paragraph({
         children: [
           new TextRun({
             text: `${options.schoolName || 'TRƯỜNG THCS QUANG TRUNG'} | ${options.department || 'TỔ TOÁN TIN'}`.toUpperCase(),
             bold: true,
-            size: 24,
-            font: 'Times New Roman',
-            color: '1E3A8A',
+            size: this.profile.heading2Size,
+            font: this.profile.fontFamily,
+            color: '000000',
           }),
         ],
         alignment: AlignmentType.CENTER,
-        spacing: { after: 120 },
+        spacing: { before: 0, after: 60 },
+        keepNext: true,
       })
     );
 
@@ -173,15 +182,16 @@ export class DocxBuilder {
         new Paragraph({
           children: [
             new TextRun({
-              text: `Giáo viên thực hiện: ${options.teacherName} | Năm học: 2026 - 2027`,
+              text: `Giáo viên thực hiện: ${options.teacherName} — Năm học: 2026 - 2027`,
               italics: true,
-              size: 22,
-              font: 'Times New Roman',
-              color: '475569',
+              size: this.profile.bodyFontSize - 2,
+              font: this.profile.fontFamily,
+              color: '333333',
             }),
           ],
           alignment: AlignmentType.CENTER,
-          spacing: { after: 200 },
+          spacing: { before: 0, after: 140 },
+          keepNext: true,
         })
       );
     }
@@ -196,19 +206,25 @@ export class DocxBuilder {
         const numCols = Math.max(...tableRows.map((r) => r.length));
         const colWidthPct = Math.floor(100 / numCols);
 
+        const cellMargin = this.profile.compactTablePadding
+          ? { top: 60, bottom: 60, left: 100, right: 100 }
+          : { top: 100, bottom: 100, left: 140, right: 140 };
+
         const rows = tableRows.map((row, rIdx) => {
           const isHeader = rIdx === 0;
           const cells = row.map((cellText) => {
-            const cellChildren = this.buildParagraphChildren(cellText.trim());
+            const cellChildren = this.buildParagraphChildren(cellText.trim(), this.profile.tableFontSize);
             return new TableCell({
               width: { size: colWidthPct, type: WidthType.PERCENTAGE },
               shading: isHeader
-                ? { type: ShadingType.CLEAR, fill: 'E2E8F0' }
+                ? { type: ShadingType.CLEAR, fill: 'F1F5F9' }
                 : undefined,
+              margins: cellMargin,
               children: [
                 new Paragraph({
-                  children: cellChildren.length > 0 ? cellChildren : [new TextRun({ text: '', font: 'Times New Roman' })],
-                  spacing: { before: 80, after: 80 },
+                  children: cellChildren.length > 0 ? cellChildren : [new TextRun({ text: '', font: this.profile.fontFamily })],
+                  spacing: { before: 20, after: 20, line: this.profile.lineSpacing },
+                  alignment: isHeader ? AlignmentType.CENTER : AlignmentType.LEFT,
                 }),
               ],
             });
@@ -217,6 +233,7 @@ export class DocxBuilder {
           return new TableRow({
             children: cells,
             tableHeader: isHeader,
+            cantSplit: true,
           });
         });
 
@@ -226,7 +243,7 @@ export class DocxBuilder {
             rows,
           })
         );
-        docElements.push(new Paragraph({ spacing: { after: 160 } }));
+        docElements.push(new Paragraph({ spacing: { before: 0, after: 60 } }));
         tableRows = [];
       }
       inTable = false;
@@ -235,9 +252,8 @@ export class DocxBuilder {
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].trim();
 
-      // Check Markdown Table line
+      // Check Table line
       if (line.startsWith('|') && line.endsWith('|')) {
-        // Skip separator line |---|---|
         if (/^\|[\s\-:\|]+\|$/.test(line)) {
           continue;
         }
@@ -253,11 +269,10 @@ export class DocxBuilder {
       }
 
       if (!line) {
-        docElements.push(new Paragraph({ spacing: { after: 120 } }));
         continue;
       }
 
-      // Headings
+      // Headings with keepNext = true
       if (line.startsWith('# ')) {
         docElements.push(
           new Paragraph({
@@ -266,12 +281,13 @@ export class DocxBuilder {
               new TextRun({
                 text: line.slice(2),
                 bold: true,
-                size: 32,
-                font: 'Times New Roman',
-                color: '1E40AF',
+                size: this.profile.heading1Size,
+                font: this.profile.fontFamily,
+                color: '000000',
               }),
             ],
-            spacing: { before: 240, after: 160 },
+            spacing: { before: 160, after: 80, line: this.profile.lineSpacing },
+            keepNext: true,
           })
         );
       } else if (line.startsWith('## ')) {
@@ -282,12 +298,13 @@ export class DocxBuilder {
               new TextRun({
                 text: line.slice(3),
                 bold: true,
-                size: 28,
-                font: 'Times New Roman',
-                color: '1E3A8A',
+                size: this.profile.heading2Size,
+                font: this.profile.fontFamily,
+                color: '000000',
               }),
             ],
-            spacing: { before: 200, after: 140 },
+            spacing: { before: 120, after: 60, line: this.profile.lineSpacing },
+            keepNext: true,
           })
         );
       } else if (line.startsWith('### ')) {
@@ -298,16 +315,16 @@ export class DocxBuilder {
               new TextRun({
                 text: line.slice(4),
                 bold: true,
-                size: 26,
-                font: 'Times New Roman',
-                color: '0F172A',
+                size: this.profile.heading3Size,
+                font: this.profile.fontFamily,
+                color: '000000',
               }),
             ],
-            spacing: { before: 160, after: 100 },
+            spacing: { before: 80, after: 40, line: this.profile.lineSpacing },
+            keepNext: true,
           })
         );
       } else if (line.startsWith('$$') && line.endsWith('$$') && line.length >= 4) {
-        // Display math alone on line
         const mathContent = line.slice(2, -2).trim();
         this.formulasConverted++;
         if (this.mathMode === 'omml') {
@@ -317,7 +334,8 @@ export class DocxBuilder {
             new Paragraph({
               children: [ImportedXmlComponent.fromXmlString(omml)],
               alignment: AlignmentType.CENTER,
-              spacing: { before: 140, after: 140 },
+              spacing: { before: 60, after: 60 },
+              keepNext: true,
             })
           );
         } else {
@@ -326,24 +344,26 @@ export class DocxBuilder {
               children: [
                 new TextRun({
                   text: `$$ ${mathContent} $$`,
-                  font: 'Cambria Math',
-                  color: '1E3A8A',
+                  font: this.profile.mathFontFamily,
+                  color: '000000',
                   bold: true,
-                  size: 26,
+                  size: this.profile.bodyFontSize,
                 }),
               ],
               alignment: AlignmentType.CENTER,
-              spacing: { before: 140, after: 140 },
+              spacing: { before: 60, after: 60 },
+              keepNext: true,
             })
           );
         }
       } else {
-        // Standard Paragraph with inline math & text formatting
+        // Regular Paragraph - Justified alignment & compact spacing
         const children = this.buildParagraphChildren(line);
         docElements.push(
           new Paragraph({
             children,
-            spacing: { after: 120, line: 276 },
+            spacing: { before: 0, after: this.profile.paragraphSpacingAfter, line: this.profile.lineSpacing },
+            alignment: AlignmentType.JUSTIFIED,
           })
         );
       }
@@ -352,17 +372,54 @@ export class DocxBuilder {
     if (inTable) flushTable();
 
     return new Document({
+      styles: {
+        default: {
+          document: {
+            run: {
+              font: this.profile.fontFamily,
+              size: this.profile.bodyFontSize,
+              color: '000000',
+            },
+            paragraph: {
+              spacing: { before: 0, after: this.profile.paragraphSpacingAfter, line: this.profile.lineSpacing },
+              alignment: AlignmentType.JUSTIFIED,
+            },
+          },
+        },
+      },
       sections: [
         {
           properties: {
             page: {
-              margin: {
-                top: 1440, // 1 inch
-                bottom: 1440,
-                left: 1440,
-                right: 1440,
+              margin: this.profile.margins,
+              pageNumbers: {
+                start: 1,
+                formatType: NumberFormat.DECIMAL,
               },
             },
+          },
+          footers: {
+            default: new Footer({
+              children: [
+                new Paragraph({
+                  alignment: AlignmentType.RIGHT,
+                  children: [
+                    new TextRun({
+                      text: 'Trang ',
+                      font: this.profile.fontFamily,
+                      size: 20,
+                      color: '64748B',
+                    }),
+                    new TextRun({
+                      children: [PageNumber.CURRENT],
+                      font: this.profile.fontFamily,
+                      size: 20,
+                      color: '64748B',
+                    }),
+                  ],
+                }),
+              ],
+            }),
           },
           children: docElements,
         },

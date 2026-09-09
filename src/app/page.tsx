@@ -381,7 +381,10 @@ export default function Home() {
   };
 
   
-  const handleDownloadWord = async (mathMode: 'omml' | 'latex' = 'omml') => {
+  const handleDownloadWord = async (
+    mathMode: 'omml' | 'latex' = 'omml',
+    printProfile: 'COMPACT_PRINT' | 'STANDARD' = 'COMPACT_PRINT'
+  ) => {
     if (!outputData?.khdh_draft) return;
 
     setExportingWord(true);
@@ -394,6 +397,7 @@ export default function Home() {
           title: 'Kế hoạch bài dạy',
           lessonCode: outputData.lesson_code || 'TOAN-8',
           mathMode,
+          printProfile,
         }),
       });
 
@@ -403,7 +407,8 @@ export default function Home() {
 
       const blob = await res.blob();
       const contentDisposition = res.headers.get('Content-Disposition') || '';
-      let filename = `KHDH_${outputData.lesson_code || 'V10'}_${mathMode.toUpperCase()}_${Date.now()}.docx`;
+      const profileSuffix = printProfile === 'COMPACT_PRINT' ? 'COMPACT' : 'STD';
+      let filename = `KHDH_${outputData.lesson_code || 'V10'}_${mathMode.toUpperCase()}_${profileSuffix}_${Date.now()}.docx`;
       
       const match = contentDisposition.match(/filename="?([^"]+)"?/);
       if (match && match[1]) {
@@ -1075,35 +1080,59 @@ export default function Home() {
                     </button>
 
                     {showWordMenu && !exportingWord && (
-                      <div className="absolute right-0 bottom-full mb-2 w-72 bg-white rounded-2xl shadow-2xl border border-slate-200 z-50 p-2 space-y-1.5 text-xs animate-in fade-in zoom-in-95 duration-100">
+                      <div className="absolute right-0 bottom-full mb-2 w-80 bg-white rounded-2xl shadow-2xl border border-slate-200 z-50 p-2 space-y-1 text-xs animate-in fade-in zoom-in-95 duration-100">
+                        <div className="px-2 py-1 text-[11px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100 mb-1">
+                          Tùy chọn xuất Word (.docx)
+                        </div>
+
+                        {/* Option 1: Compact Print OMML (Default) */}
                         <button
                           onClick={() => {
                             setShowWordMenu(false);
-                            handleDownloadWord('omml');
+                            handleDownloadWord('omml', 'COMPACT_PRINT');
                           }}
-                          className="w-full text-left p-2.5 hover:bg-blue-50 rounded-xl transition-all flex flex-col gap-0.5 group border border-transparent hover:border-blue-200"
+                          className="w-full text-left p-2.5 hover:bg-blue-50/80 rounded-xl transition-all flex flex-col gap-0.5 group border border-transparent hover:border-blue-200 bg-blue-50/40"
                         >
-                          <div className="font-bold text-blue-900 flex items-center gap-1.5">
-                            <span>✓</span> Word chuẩn OMML
-                            <span className="text-[10px] bg-blue-100 text-blue-800 px-1.5 py-0.2 rounded font-bold">Khuyến nghị</span>
+                          <div className="font-bold text-blue-900 flex items-center justify-between">
+                            <span className="flex items-center gap-1.5">
+                              <span>🖨️</span> Word OMML – Tiết kiệm in
+                            </span>
+                            <span className="text-[10px] bg-blue-600 text-white px-1.5 py-0.2 rounded-full font-bold">Mặc định</span>
                           </div>
-                          <p className="text-[11px] text-slate-500 group-hover:text-blue-700 leading-tight">
-                            Công thức toán chuyển thành Equation Object, chỉnh sửa trực tiếp trong Microsoft Word
+                          <p className="text-[11px] text-slate-600 group-hover:text-blue-800 leading-snug mt-0.5">
+                            Font 13pt, lề gọn 15-20mm, giãn dòng 1.05, tối ưu trang &amp; mực in đen trắng
                           </p>
                         </button>
 
+                        {/* Option 2: Standard OMML */}
                         <button
                           onClick={() => {
                             setShowWordMenu(false);
-                            handleDownloadWord('latex');
+                            handleDownloadWord('omml', 'STANDARD');
                           }}
                           className="w-full text-left p-2.5 hover:bg-slate-50 rounded-xl transition-all flex flex-col gap-0.5 group border border-transparent hover:border-slate-200"
                         >
                           <div className="font-bold text-slate-800 flex items-center gap-1.5">
-                            <span>📄</span> Word giữ công thức LaTeX
+                            <span>📄</span> Word OMML – Tiêu chuẩn
                           </div>
-                          <p className="text-[11px] text-slate-500 group-hover:text-slate-700 leading-tight">
-                            Giữ nguyên mã công thức gốc ($...$) để dễ copy và tái sử dụng
+                          <p className="text-[11px] text-slate-500 group-hover:text-slate-700 leading-snug mt-0.5">
+                            Font 14pt, lề chuẩn 20-25mm, giãn dòng 1.15 rộng rãi, công thức Equation
+                          </p>
+                        </button>
+
+                        {/* Option 3: LaTeX Raw Mode */}
+                        <button
+                          onClick={() => {
+                            setShowWordMenu(false);
+                            handleDownloadWord('latex', 'COMPACT_PRINT');
+                          }}
+                          className="w-full text-left p-2.5 hover:bg-slate-50 rounded-xl transition-all flex flex-col gap-0.5 group border border-transparent hover:border-slate-200"
+                        >
+                          <div className="font-bold text-slate-800 flex items-center gap-1.5">
+                            <span>📐</span> Word giữ công thức LaTeX
+                          </div>
+                          <p className="text-[11px] text-slate-500 group-hover:text-slate-700 leading-snug mt-0.5">
+                            Giữ nguyên mã nguồn $...$ để dễ copy và tái sử dụng
                           </p>
                         </button>
                       </div>
