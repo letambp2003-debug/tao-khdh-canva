@@ -19,40 +19,55 @@ import { OmmlConverter } from './omml-converter';
 import { MathExportMode, PrintProfile, ProfileConfig, WordExportOptions } from './export.types';
 import { PROFILES } from './word-export.config';
 
+function sanitizeXmlText(text: string): string {
+  if (!text) return '';
+  return text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x84\x86-\x9F]/g, '');
+}
+
+function importOmmlComponents(xmlStr: string): (TextRun | ImportedXmlComponent)[] {
+  const imported = ImportedXmlComponent.fromXmlString(xmlStr);
+  const anyImported = imported as unknown as { rootKey?: string; root?: unknown[] };
+  if (!anyImported.rootKey && Array.isArray(anyImported.root)) {
+    return anyImported.root as unknown as (TextRun | ImportedXmlComponent)[];
+  }
+  return [imported];
+}
+
 interface Segment {
   type: 'text' | 'inline-math' | 'display-math';
   content: string;
 }
 
 function parseLineSegments(line: string): Segment[] {
+  const cleanLine = sanitizeXmlText(line);
   const segments: Segment[] = [];
   let cursor = 0;
 
-  while (cursor < line.length) {
-    if (line.startsWith('$$', cursor)) {
-      const end = line.indexOf('$$', cursor + 2);
+  while (cursor < cleanLine.length) {
+    if (cleanLine.startsWith('$$', cursor)) {
+      const end = cleanLine.indexOf('$$', cursor + 2);
       if (end !== -1) {
-        const math = line.slice(cursor + 2, end);
+        const math = cleanLine.slice(cursor + 2, end);
         segments.push({ type: 'display-math', content: math });
         cursor = end + 2;
         continue;
       }
     }
 
-    if (line[cursor] === '$' && (cursor === 0 || line[cursor - 1] !== '\\')) {
-      const end = line.indexOf('$', cursor + 1);
+    if (cleanLine[cursor] === '$' && (cursor === 0 || cleanLine[cursor - 1] !== '\\')) {
+      const end = cleanLine.indexOf('$', cursor + 1);
       if (end !== -1 && end > cursor + 1) {
-        const math = line.slice(cursor + 1, end);
+        const math = cleanLine.slice(cursor + 1, end);
         segments.push({ type: 'inline-math', content: math });
         cursor = end + 1;
         continue;
       }
     }
 
-    let nextMath = line.indexOf('$', cursor);
-    if (nextMath === -1) nextMath = line.length;
+    let nextMath = cleanLine.indexOf('$', cursor);
+    if (nextMath === -1) nextMath = cleanLine.length;
 
-    const text = line.slice(cursor, nextMath);
+    const text = cleanLine.slice(cursor, nextMath);
     if (text) {
       segments.push({ type: 'text', content: text });
     }
@@ -85,7 +100,7 @@ export class DocxBuilder {
         if (this.mathMode === 'omml') {
           const { omml, isFallback } = OmmlConverter.latexToOmml(seg.content, false);
           if (isFallback) this.ommlFallbackCount++;
-          children.push(ImportedXmlComponent.fromXmlString(omml));
+          children.push(...importOmmlComponents(omml));
         } else {
           children.push(
             new TextRun({
@@ -102,7 +117,7 @@ export class DocxBuilder {
         if (this.mathMode === 'omml') {
           const { omml, isFallback } = OmmlConverter.latexToOmml(seg.content, false);
           if (isFallback) this.ommlFallbackCount++;
-          children.push(ImportedXmlComponent.fromXmlString(omml));
+          children.push(...importOmmlComponents(omml));
         } else {
           children.push(
             new TextRun({
@@ -213,16 +228,25 @@ export class DocxBuilder {
         const rows = tableRows.map((row, rIdx) => {
           const isHeader = rIdx === 0;
           const cells = row.map((cellText) => {
-            const cellChildren = this.buildParagraphChildren(cellText.trim(), this.profile.tableFontSize);
+            const cellLines = cellText.split(/<br\s*\/?>/gi);
+            const cellParagraphs = cellLines.map((cL) => {
+              const cellChildren = this.buildParagraphChildren(cL.trim(), this.profile.tableFontSize);
+              return new Paragraph({
+                children: cellChildren.length > 0 ? cellChildren : [new TextRun({ text: '', font: this.profile.fontFamily })],
+                spacing: { before: 20, after: 20, line: this.profile.lineSpacing },
+                alignment: isHeader ? AlignmentType.CENTER : AlignmentType.LEFT,
+              });
+            });
+
             return new TableCell({
               width: { size: colWidthPct, type: WidthType.PERCENTAGE },
               shading: isHeader
                 ? { type: ShadingType.CLEAR, fill: 'F1F5F9' }
                 : undefined,
               margins: cellMargin,
-              children: [
+              children: cellParagraphs.length > 0 ? cellParagraphs : [
                 new Paragraph({
-                  children: cellChildren.length > 0 ? cellChildren : [new TextRun({ text: '', font: this.profile.fontFamily })],
+                  children: [new TextRun({ text: '', font: this.profile.fontFamily })],
                   spacing: { before: 20, after: 20, line: this.profile.lineSpacing },
                   alignment: isHeader ? AlignmentType.CENTER : AlignmentType.LEFT,
                 }),
@@ -332,7 +356,7 @@ export class DocxBuilder {
           if (isFallback) this.ommlFallbackCount++;
           docElements.push(
             new Paragraph({
-              children: [ImportedXmlComponent.fromXmlString(omml)],
+              children: importOmmlComponents(omml),
               alignment: AlignmentType.CENTER,
               spacing: { before: 60, after: 60 },
               keepNext: true,

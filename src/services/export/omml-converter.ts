@@ -328,12 +328,12 @@ export class OmmlConverter {
 
       if (isDisplay) {
         return {
-          omml: `<m:oMathPara xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"><m:oMath>${ommlInner}</m:oMath></m:oMathPara>`,
+          omml: `<m:oMathPara><m:oMath>${ommlInner}</m:oMath></m:oMathPara>`,
           isFallback: false,
         };
       } else {
         return {
-          omml: `<m:oMath xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math">${ommlInner}</m:oMath>`,
+          omml: `<m:oMath>${ommlInner}</m:oMath>`,
           isFallback: false,
         };
       }
@@ -341,12 +341,12 @@ export class OmmlConverter {
       const safeText = escapeXml(latexStr);
       if (isDisplay) {
         return {
-          omml: `<m:oMathPara xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"><m:oMath><m:r><m:t>${safeText}</m:t></m:r></m:oMath></m:oMathPara>`,
+          omml: `<m:oMathPara><m:oMath><m:r><m:t>${safeText}</m:t></m:r></m:oMath></m:oMathPara>`,
           isFallback: true,
         };
       }
       return {
-        omml: `<m:oMath xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"><m:r><m:t>${safeText}</m:t></m:r></m:oMath>`,
+        omml: `<m:oMath><m:r><m:t>${safeText}</m:t></m:r></m:oMath>`,
         isFallback: true,
       };
     }

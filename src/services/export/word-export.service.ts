@@ -2,6 +2,7 @@ import { Packer } from 'docx';
 import { DocxBuilder } from './docx-builder';
 import { ContentNormalizer } from './content-normalizer';
 import { WordExportOptions, WordExportResult } from './export.types';
+import { OOXmlValidator } from './ooxml-validator';
 
 export class WordExportService {
   public static sanitizeFileName(name: string): string {
@@ -30,6 +31,13 @@ export class WordExportService {
     // 3. Đóng gói DOCX buffer
     const buffer = await Packer.toBuffer(doc);
 
+    // 4. Kiểm tra toàn vẹn gói ZIP & cấu trúc OOXML (Phase 29 Acceptance Gate)
+    const validation = await OOXmlValidator.validate(buffer);
+    if (!validation.valid) {
+      console.error('[WORD_EXPORT_VALIDATION_FAILED]', validation.errors);
+      throw new Error(`WORD_EXPORT_VALIDATION_FAILED: ${validation.errors.join('; ')}`);
+    }
+
     const dateStr = new Date().toISOString().slice(0, 10);
     const rawLesson = options.lessonCode || options.title || 'KHDH_V10';
     const safeCode = this.sanitizeFileName(rawLesson);
@@ -48,3 +56,4 @@ export class WordExportService {
     };
   }
 }
+

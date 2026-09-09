@@ -402,10 +402,25 @@ export default function Home() {
       });
 
       if (!res.ok) {
-        throw new Error('Không thể tạo file Word. Vui lòng thử lại.');
+        let errMessage = 'Không thể tạo file Word. Vui lòng thử lại.';
+        try {
+          const errData = await res.json();
+          if (errData?.message) errMessage = errData.message;
+        } catch {}
+        throw new Error(errMessage);
+      }
+
+      const contentType = res.headers.get('Content-Type') || '';
+      if (contentType.includes('application/json')) {
+        const errData = await res.json();
+        throw new Error(errData?.message || 'Lỗi xử lý file Word.');
       }
 
       const blob = await res.blob();
+      const docxBlob = new Blob([blob], {
+        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      });
+
       const contentDisposition = res.headers.get('Content-Disposition') || '';
       const profileSuffix = printProfile === 'COMPACT_PRINT' ? 'COMPACT' : 'STD';
       let filename = `KHDH_${outputData.lesson_code || 'V10'}_${mathMode.toUpperCase()}_${profileSuffix}_${Date.now()}.docx`;
@@ -415,7 +430,7 @@ export default function Home() {
         filename = decodeURIComponent(match[1]);
       }
 
-      const url = URL.createObjectURL(blob);
+      const url = URL.createObjectURL(docxBlob);
       const a = document.createElement('a');
       a.href = url;
       a.download = filename;
