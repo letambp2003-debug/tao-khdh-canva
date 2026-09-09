@@ -3,6 +3,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ApiKeyService } from '@/services/ai/api-key.service';
 import type { MultiKeyTestResult } from '@/services/ai/ai.types';
+import type { SourceDocument, SourceDocumentType, SourceReadinessReport } from '@/types/source-document';
 
 const COMMANDS = [
   { id: 'KHOI_DONG', label: '🚀 Khởi động', desc: 'Lập chỉ mục nguồn & kiểm tra hệ thống' },
@@ -12,6 +13,39 @@ const COMMANDS = [
   { id: 'TAO_SLIDE_NGHIEN_CUU', label: '📊 Tạo Slide nghiên cứu', desc: '15-20 slide chuẩn sư phạm mỗi tiết' },
   { id: 'XUAT_CANVA_PROMPT', label: '🎨 Xuất Canva Prompt', desc: 'Mã prompt độc lập cho từng slide' }
 ];
+
+const DOC_TYPE_LABELS: Record<SourceDocumentType, { label: string; icon: string; badgeClass: string; desc: string }> = {
+  PL1: {
+    label: 'Phụ lục I',
+    icon: '⭐',
+    badgeClass: 'bg-amber-100 text-amber-900 border-amber-300',
+    desc: 'Ưu tiên số 1: Danh mục bài, số tiết, YCCĐ, phân phối tiến trình.'
+  },
+  PPCT: {
+    label: 'PPCT (Phân phối CT)',
+    icon: '📘',
+    badgeClass: 'bg-blue-100 text-blue-900 border-blue-300',
+    desc: 'Ưu tiên số 2: Thứ tự bài, số tiết, tuần học.'
+  },
+  SGK: {
+    label: 'Sách giáo khoa (SGK)',
+    icon: '📗',
+    badgeClass: 'bg-emerald-100 text-emerald-900 border-emerald-300',
+    desc: 'Nguồn kiến thức môn học chính: Thuật ngữ, công thức, ví dụ chuẩn.'
+  },
+  KHDH_OLD: {
+    label: 'KHDH cũ (Tham khảo)',
+    icon: '📙',
+    badgeClass: 'bg-purple-100 text-purple-900 border-purple-300',
+    desc: 'Tài liệu tham khảo cấu trúc & hoạt động. Không ghi đè nguồn chính.'
+  },
+  OTHER: {
+    label: 'Tài liệu khác',
+    icon: '📄',
+    badgeClass: 'bg-slate-100 text-slate-800 border-slate-300',
+    desc: 'SBT, SGV, Phụ lục III, Khung năng lực số, Tài liệu địa phương...'
+  }
+};
 
 interface OutputData {
   status: string;
@@ -27,13 +61,15 @@ interface OutputData {
   model?: string;
   duration_ms?: number;
   key_used?: string;
+  sources_used?: { id: string; name: string; type: SourceDocumentType; version: number }[];
+  source_readiness?: SourceReadinessReport;
 }
 
 export default function Home() {
   const [command, setCommand] = useState('SOAN_XUAT');
   const [lessonCode, setLessonCode] = useState('TOAN-8-HKI-SODAISO-C01-STT01');
   const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'draft' | 'preview' | 'slide' | 'stats'>('draft');
+  const [activeTab, setActiveTab] = useState<'draft' | 'preview' | 'slide' | 'sources' | 'stats'>('draft');
   const [error, setError] = useState<string | null>(null);
   const [outputData, setOutputData] = useState<OutputData | null>(null);
   const [pipelineStep, setPipelineStep] = useState<string>('');
@@ -46,17 +82,172 @@ export default function Home() {
   const [multiKeyResult, setMultiKeyResult] = useState<MultiKeyTestResult | null>(null);
   const [configuredKeyCount, setConfiguredKeyCount] = useState(0);
 
+  // Source Documents State
+  const [documents, setDocuments] = useState<SourceDocument[]>([]);
+  const [docLoading, setDocLoading] = useState(false);
+  const [readiness, setReadiness] = useState<SourceReadinessReport | null>(null);
+  const [previewDoc, setPreviewDoc] = useState<SourceDocument | null>(null);
+  const [replacingDocId, setReplacingDocId] = useState<string | null>(null);
+  const [editingDoc, setEditingDoc] = useState<{ id: string; displayName: string; documentType: SourceDocumentType } | null>(null);
+  const [deleteConfirmDoc, setDeleteConfirmDoc] = useState<SourceDocument | null>(null);
+
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const replaceFileInputRef = useRef<HTMLInputElement | null>(null);
+  const pendingUploadTypeRef = useRef<SourceDocumentType | undefined>(undefined);
   const abortControllerRef = useRef<AbortController | null>(null);
 
+  // Load API keys & documents on mount
   useEffect(() => {
     const keys = ApiKeyService.getClientKeys();
     if (keys.length > 0) {
       setRawKeysInput(keys.join('\n'));
       setConfiguredKeyCount(keys.length);
     }
+    fetchDocuments();
   }, []);
 
   const currentParsedKeys = ApiKeyService.parseKeys(rawKeysInput);
+
+  const fetchDocuments = async () => {
+    setDocLoading(true);
+    try {
+      const res = await fetch('/api/documents');
+      const data = await res.json();
+      if (data.success) {
+        setDocuments(data.documents || []);
+        setReadiness(data.readiness || null);
+      }
+    } catch (err) {
+      console.error('Error fetching documents:', err);
+    } finally {
+      setDocLoading(false);
+    }
+  };
+
+  const handleTriggerUpload = (type?: SourceDocumentType) => {
+    pendingUploadTypeRef.current = type;
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+      fileInputRef.current.click();
+    }
+  };
+
+  const handleFileUploadChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const formData = new FormData();
+    for (let i = 0; i < files.length; i++) {
+      formData.append('files', files[i]);
+    }
+    if (pendingUploadTypeRef.current) {
+      formData.append('documentType', pendingUploadTypeRef.current);
+    }
+
+    setDocLoading(true);
+    try {
+      const res = await fetch('/api/documents', {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || 'Lỗi khi tải tài liệu');
+      }
+      await fetchDocuments();
+    } catch (err: unknown) {
+      const msg = (err as Error)?.message || 'Lỗi tải tệp';
+      setError(msg);
+    } finally {
+      setDocLoading(false);
+      pendingUploadTypeRef.current = undefined;
+    }
+  };
+
+  const handleTriggerReplace = (docId: string) => {
+    setReplacingDocId(docId);
+    if (replaceFileInputRef.current) {
+      replaceFileInputRef.current.value = '';
+      replaceFileInputRef.current.click();
+    }
+  };
+
+  const handleReplaceFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0 || !replacingDocId) return;
+
+    const file = files[0];
+    const formData = new FormData();
+    formData.append('file', file);
+
+    setDocLoading(true);
+    try {
+      const res = await fetch(`/api/documents/${replacingDocId}/replace`, {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || 'Lỗi khi thay thế tài liệu');
+      }
+      await fetchDocuments();
+    } catch (err: unknown) {
+      const msg = (err as Error)?.message || 'Lỗi thay thế tệp';
+      setError(msg);
+    } finally {
+      setDocLoading(false);
+      setReplacingDocId(null);
+    }
+  };
+
+  const handleToggleDocActive = async (id: string, currentActive: boolean) => {
+    try {
+      const res = await fetch(`/api/documents/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isActive: !currentActive }),
+      });
+      if (res.ok) {
+        await fetchDocuments();
+      }
+    } catch (err) {
+      console.error('Error toggling document:', err);
+    }
+  };
+
+  const handleSaveDocEdit = async () => {
+    if (!editingDoc) return;
+    try {
+      const res = await fetch(`/api/documents/${editingDoc.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          displayName: editingDoc.displayName,
+          documentType: editingDoc.documentType,
+        }),
+      });
+      if (res.ok) {
+        setEditingDoc(null);
+        await fetchDocuments();
+      }
+    } catch (err) {
+      console.error('Error updating document:', err);
+    }
+  };
+
+  const handleDeleteDocument = async (id: string) => {
+    try {
+      const res = await fetch(`/api/documents/${id}`, {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        setDeleteConfirmDoc(null);
+        await fetchDocuments();
+      }
+    } catch (err) {
+      console.error('Error deleting document:', err);
+    }
+  };
 
   const handleTestKeys = async () => {
     if (currentParsedKeys.length === 0) {
@@ -125,7 +316,7 @@ export default function Home() {
 
     setLoading(true);
     setError(null);
-    setPipelineStep('Đang kết nối Google AI...');
+    setPipelineStep('Đang chuẩn bị căn cứ tài liệu nguồn & kết nối Google AI...');
     setOutputData(null);
 
     const controller = new AbortController();
@@ -135,7 +326,10 @@ export default function Home() {
       const activeKeys = currentParsedKeys.length > 0 ? currentParsedKeys : ApiKeyService.getClientKeys();
       const jobId = `JOB-${Date.now()}`;
 
-      setPipelineStep('Đang điều phối Agent & thực thi (Xoay vòng Key tự động)...');
+      // Lấy danh sách ID các tài liệu đang Active & Ready
+      const activeDocIds = documents.filter((d) => d.isActive && d.status === 'READY').map((d) => d.id);
+
+      setPipelineStep('Đang điều phối Agent & thực thi (Bám sát căn cứ tài liệu nguồn & Xoay vòng Key)...');
 
       const res = await fetch('/api/generate-khdh', {
         method: 'POST',
@@ -145,6 +339,7 @@ export default function Home() {
           lessonCode: lessonCode.trim(),
           jobId,
           apiKeys: activeKeys,
+          documentIds: activeDocIds,
         }),
         signal: controller.signal,
       });
@@ -198,6 +393,23 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900 p-4 md:p-6 font-sans">
+      {/* Hidden File Inputs */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleFileUploadChange}
+        multiple
+        accept=".pdf,.docx,.doc,.xlsx,.xls,.txt,.md"
+        className="hidden"
+      />
+      <input
+        type="file"
+        ref={replaceFileInputRef}
+        onChange={handleReplaceFileChange}
+        accept=".pdf,.docx,.doc,.xlsx,.xls,.txt,.md"
+        className="hidden"
+      />
+
       {/* Header */}
       <header className="mb-6 bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
@@ -255,6 +467,238 @@ export default function Home() {
           </button>
         </div>
       )}
+
+      {/* SECTION TÀI LIỆU NGUỒN (SOURCE DOCUMENTS MODULE) */}
+      <section className="mb-6 bg-white p-5 rounded-2xl shadow-sm border border-slate-200 space-y-4">
+        <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 border-b border-slate-100 pb-3">
+          <div>
+            <h2 className="text-lg font-black text-slate-800 flex items-center gap-2">
+              <span>📚</span> TÀI LIỆU NGUỒN
+            </h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Căn cứ pháp lý & học liệu chính thức cho AI biên soạn KHDH (Thứ tự ưu tiên: Phụ lục I &gt; PPCT &gt; SGK &gt; KHDH cũ)
+            </p>
+          </div>
+
+          {/* Quick Action Buttons */}
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => handleTriggerUpload('PL1')}
+              disabled={docLoading}
+              className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1"
+            >
+              <span>+</span> Bổ sung Phụ lục I
+            </button>
+            <button
+              onClick={() => handleTriggerUpload('PPCT')}
+              disabled={docLoading}
+              className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-900 border border-blue-300 rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1"
+            >
+              <span>+</span> Bổ sung PPCT
+            </button>
+            <button
+              onClick={() => handleTriggerUpload('SGK')}
+              disabled={docLoading}
+              className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1"
+            >
+              <span>+</span> Bổ sung SGK_
+            </button>
+            <button
+              onClick={() => handleTriggerUpload('KHDH_OLD')}
+              disabled={docLoading}
+              className="px-3 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-300 rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1"
+            >
+              <span>+</span> Bổ sung KHDH_ cũ
+            </button>
+            <button
+              onClick={() => handleTriggerUpload('OTHER')}
+              disabled={docLoading}
+              className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1"
+            >
+              <span>+</span> Thêm tài liệu khác
+            </button>
+          </div>
+        </div>
+
+        {/* Source Readiness Status Bar */}
+        <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="font-bold text-slate-700">Mức độ sẵn sàng nguồn:</span>
+            
+            <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md font-semibold border ${
+              readiness?.pl1Status === 'READY'
+                ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                : 'bg-slate-200 text-slate-600 border-slate-300'
+            }`}>
+              <span>{readiness?.pl1Status === 'READY' ? '🟢' : '⚪'}</span>
+              <span>Phụ lục I: {readiness?.pl1Status === 'READY' ? 'Sẵn sàng' : 'Chưa có'}</span>
+            </span>
+
+            <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md font-semibold border ${
+              readiness?.ppctStatus === 'READY'
+                ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                : 'bg-slate-200 text-slate-600 border-slate-300'
+            }`}>
+              <span>{readiness?.ppctStatus === 'READY' ? '🟢' : '⚪'}</span>
+              <span>PPCT: {readiness?.ppctStatus === 'READY' ? 'Sẵn sàng' : 'Chưa có'}</span>
+            </span>
+
+            <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md font-semibold border ${
+              readiness?.sgkStatus === 'READY'
+                ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                : 'bg-slate-200 text-slate-600 border-slate-300'
+            }`}>
+              <span>{readiness?.sgkStatus === 'READY' ? '🟢' : '⚪'}</span>
+              <span>SGK: {readiness?.sgkStatus === 'READY' ? 'Sẵn sàng' : 'Chưa có'}</span>
+            </span>
+
+            <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md font-semibold border ${
+              readiness?.khdhOldStatus === 'READY'
+                ? 'bg-purple-100 text-purple-900 border-purple-300'
+                : 'bg-slate-200 text-slate-600 border-slate-300'
+            }`}>
+              <span>{readiness?.khdhOldStatus === 'READY' ? '🟣' : '⚪'}</span>
+              <span>KHDH cũ: {readiness?.khdhOldStatus === 'READY' ? 'Có (Tham khảo)' : 'Chưa có'}</span>
+            </span>
+          </div>
+
+          <div className="text-slate-500 text-xs italic">
+            {readiness?.isSufficient 
+              ? '✅ Đã đủ căn cứ tài liệu nguồn để thực thi tác vụ AI.'
+              : '💡 Có thể bổ sung thêm tài liệu để tăng độ chính xác.'}
+          </div>
+        </div>
+
+        {/* Document List / Empty State */}
+        {docLoading && (
+          <div className="p-6 text-center text-xs text-slate-500">
+            <span className="animate-spin inline-block w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full mr-2" />
+            Đang xử lý tài liệu nguồn...
+          </div>
+        )}
+
+        {!docLoading && documents.length === 0 && (
+          <div className="p-8 text-center bg-slate-50/50 border-2 border-dashed border-slate-200 rounded-xl space-y-3">
+            <span className="text-3xl">📂</span>
+            <p className="font-semibold text-sm text-slate-700">Chưa có tài liệu nguồn.</p>
+            <p className="text-xs text-slate-500 max-w-md mx-auto">
+              Nhấn các nút phía trên hoặc kéo thả tệp (.pdf, .docx, .xlsx, .txt, .md) vào đây để nạp tài liệu làm căn cứ biên soạn.
+            </p>
+          </div>
+        )}
+
+        {!docLoading && documents.length > 0 && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[360px] overflow-y-auto pr-1">
+            {documents.map((doc) => {
+              const meta = DOC_TYPE_LABELS[doc.documentType] || DOC_TYPE_LABELS.OTHER;
+              return (
+                <div
+                  key={doc.id}
+                  className={`p-3.5 rounded-xl border transition-all flex flex-col justify-between space-y-2.5 ${
+                    doc.isActive && doc.status === 'READY'
+                      ? 'bg-white border-slate-300 shadow-xs'
+                      : 'bg-slate-50/70 border-slate-200 opacity-80'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-start gap-2.5 overflow-hidden">
+                      <span className="text-xl shrink-0 mt-0.5">{meta.icon}</span>
+                      <div className="overflow-hidden">
+                        <div className="font-bold text-sm text-slate-800 truncate" title={doc.displayName}>
+                          {doc.displayName}
+                        </div>
+                        <div className="text-xs text-slate-500 truncate" title={doc.originalFileName}>
+                          {doc.originalFileName}
+                        </div>
+                      </div>
+                    </div>
+
+                    <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 shrink-0 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={doc.isActive}
+                        onChange={() => handleToggleDocActive(doc.id, doc.isActive)}
+                        className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span>{doc.isActive ? 'Sử dụng' : 'Tắt'}</span>
+                    </label>
+                  </div>
+
+                  {/* Badges */}
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <span className={`px-2 py-0.5 rounded-full font-bold border text-[11px] ${meta.badgeClass}`}>
+                      {meta.label}
+                    </span>
+
+                    <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded font-mono text-[11px] border border-slate-200">
+                      v{doc.version}
+                    </span>
+
+                    <span className="text-slate-500 text-[11px]">
+                      {(doc.fileSize / 1024).toFixed(1)} KB
+                    </span>
+
+                    <span className={`px-2 py-0.5 rounded-full font-medium text-[11px] ${
+                      doc.status === 'READY'
+                        ? 'bg-emerald-50 text-emerald-700'
+                        : doc.status === 'REPLACED'
+                        ? 'bg-slate-100 text-slate-600'
+                        : doc.status === 'ERROR'
+                        ? 'bg-rose-50 text-rose-700'
+                        : 'bg-amber-50 text-amber-700'
+                    }`}>
+                      {doc.status === 'READY'
+                        ? '✓ Sẵn sàng'
+                        : doc.status === 'REPLACED'
+                        ? 'Đã thay thế'
+                        : doc.status === 'ERROR'
+                        ? 'Lỗi xử lý'
+                        : 'Đang xử lý'}
+                    </span>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center justify-between pt-1 border-t border-slate-100 text-xs gap-1">
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => setPreviewDoc(doc)}
+                        className="px-2 py-1 text-slate-700 hover:bg-slate-100 rounded font-medium border border-slate-200 shadow-2xs"
+                      >
+                        👁️ Xem
+                      </button>
+                      <button
+                        onClick={() => handleTriggerReplace(doc.id)}
+                        className="px-2 py-1 text-blue-700 hover:bg-blue-50 rounded font-medium border border-blue-200 shadow-2xs"
+                      >
+                        🔄 Thay thế
+                      </button>
+                      <button
+                        onClick={() =>
+                          setEditingDoc({
+                            id: doc.id,
+                            displayName: doc.displayName,
+                            documentType: doc.documentType,
+                          })
+                        }
+                        className="px-2 py-1 text-slate-600 hover:bg-slate-100 rounded font-medium border border-slate-200"
+                      >
+                        ✏️ Sửa
+                      </button>
+                    </div>
+
+                    <button
+                      onClick={() => setDeleteConfirmDoc(doc)}
+                      className="px-2 py-1 text-rose-600 hover:bg-rose-50 rounded font-medium border border-rose-200"
+                    >
+                      🗑️ Xóa
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
 
       {/* Main Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -367,6 +811,12 @@ export default function Home() {
               </span>
             </div>
             <div className="flex justify-between">
+              <span>Căn cứ nguồn:</span>
+              <span className="font-semibold text-slate-800">
+                {documents.filter((d) => d.isActive && d.status === 'READY').length} tài liệu sẵn sàng
+              </span>
+            </div>
+            <div className="flex justify-between">
               <span>Định dạng bảng:</span>
               <span className="font-semibold text-slate-800">2 cột (CV 5512)</span>
             </div>
@@ -386,11 +836,12 @@ export default function Home() {
                 { id: 'draft', label: '📝 Bản Thảo KHDH' },
                 { id: 'preview', label: '📐 Xem Trước 2 Cột' },
                 { id: 'slide', label: '📊 Slide & Canva' },
+                { id: 'sources', label: '📚 Nguồn Sử Dụng' },
                 { id: 'stats', label: '📈 Thống Kê & Key' },
               ].map((tab) => (
                 <button
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id as 'draft' | 'preview' | 'slide' | 'stats')}
+                  onClick={() => setActiveTab(tab.id as 'draft' | 'preview' | 'slide' | 'sources' | 'stats')}
                   className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all ${
                     activeTab === tab.id
                       ? 'bg-white text-blue-700 shadow-sm'
@@ -452,6 +903,45 @@ export default function Home() {
                           ? outputData.khdh_draft
                           : 'Để xem Canva prompt chi tiết, hãy chạy lệnh XUAT_CANVA_PROMPT hoặc SOAN_XUAT_CANVA.'}
                       </div>
+                    </div>
+                  )}
+
+                  {activeTab === 'sources' && (
+                    <div className="space-y-4 text-xs">
+                      <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-blue-900">
+                        <p className="font-bold flex items-center gap-1.5">
+                          <span>📚</span> Danh sách căn cứ tài liệu nguồn đã được AI sử dụng:
+                        </p>
+                      </div>
+
+                      {outputData.sources_used && outputData.sources_used.length > 0 ? (
+                        <div className="space-y-2">
+                          {outputData.sources_used.map((s, idx) => {
+                            const meta = DOC_TYPE_LABELS[s.type] || DOC_TYPE_LABELS.OTHER;
+                            return (
+                              <div
+                                key={idx}
+                                className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <span>{meta.icon}</span>
+                                  <div>
+                                    <div className="font-bold text-slate-800">{s.name}</div>
+                                    <div className="text-slate-500 text-[11px]">{meta.desc}</div>
+                                  </div>
+                                </div>
+                                <span className={`px-2 py-0.5 rounded font-bold text-xs border ${meta.badgeClass}`}>
+                                  v{s.version}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="p-4 text-center text-slate-500 bg-slate-50 rounded-xl border">
+                          Chưa có tài liệu nguồn nào được tải lên cho lần tạo này (dùng chuẩn mặc định 5512).
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -668,6 +1158,143 @@ export default function Home() {
                   Lưu & Áp Dụng
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Document Preview Modal */}
+      {previewDoc && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white max-w-2xl w-full rounded-2xl p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] flex flex-col">
+            <div className="flex justify-between items-center border-b pb-3 shrink-0">
+              <div className="flex items-center gap-2">
+                <span className="text-2xl">{DOC_TYPE_LABELS[previewDoc.documentType]?.icon || '📄'}</span>
+                <div>
+                  <h3 className="text-base font-bold text-slate-800 truncate">{previewDoc.displayName}</h3>
+                  <p className="text-xs text-slate-500">{previewDoc.originalFileName} (Phiên bản v{previewDoc.version})</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setPreviewDoc(null)}
+                className="text-slate-400 hover:text-slate-600 font-bold text-lg"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-3 text-xs text-slate-700">
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
+                <div><span className="font-semibold">Phân loại:</span> {DOC_TYPE_LABELS[previewDoc.documentType]?.label}</div>
+                <div><span className="font-semibold">Dung lượng:</span> {(previewDoc.fileSize / 1024).toFixed(1)} KB</div>
+                <div><span className="font-semibold">Ngày nạp:</span> {new Date(previewDoc.createdAt).toLocaleString('vi-VN')}</div>
+                <div><span className="font-semibold">Trạng thái:</span> {previewDoc.status}</div>
+                <div><span className="font-semibold">Tóm tắt:</span> {previewDoc.contentSummary}</div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-800 mb-1">Nội dung văn bản trích xuất:</label>
+                <div className="font-mono text-xs whitespace-pre-wrap bg-slate-900 text-slate-100 p-4 rounded-xl max-h-72 overflow-y-auto leading-relaxed border border-slate-800">
+                  {previewDoc.extractedText || 'Chưa có nội dung văn bản trích xuất.'}
+                </div>
+              </div>
+            </div>
+
+            <div className="border-t pt-3 flex justify-end gap-2 shrink-0">
+              <button
+                onClick={() => setPreviewDoc(null)}
+                className="btn-primary text-xs"
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Document Modal */}
+      {editingDoc && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white max-w-md w-full rounded-2xl p-6 shadow-2xl border border-slate-200 space-y-4">
+            <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
+              <span>✏️</span> Chỉnh Sửa Thông Tin Tài Liệu Nguồn
+            </h3>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Tên hiển thị:</label>
+                <input
+                  type="text"
+                  value={editingDoc.displayName}
+                  onChange={(e) => setEditingDoc({ ...editingDoc, displayName: e.target.value })}
+                  className="input-field text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Phân loại tài liệu:</label>
+                <select
+                  value={editingDoc.documentType}
+                  onChange={(e) => setEditingDoc({ ...editingDoc, documentType: e.target.value as SourceDocumentType })}
+                  className="input-field text-xs"
+                >
+                  <option value="PL1">⭐ Phụ lục I hiện hành (Ưu tiên 1)</option>
+                  <option value="PPCT">📘 PPCT - Phân phối chương trình (Ưu tiên 2)</option>
+                  <option value="SGK">📗 Sách giáo khoa - SGK (Kiến thức chính)</option>
+                  <option value="KHDH_OLD">📙 KHDH cũ (Tài liệu tham khảo)</option>
+                  <option value="OTHER">📄 Tài liệu khác (SBT, SGV, Phụ lục III...)</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 border-t pt-4">
+              <button
+                onClick={() => setEditingDoc(null)}
+                className="px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg"
+              >
+                Hủy
+              </button>
+              <button
+                onClick={handleSaveDocEdit}
+                className="btn-primary text-xs"
+              >
+                Lưu Thay Đổi
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deleteConfirmDoc && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white max-w-sm w-full rounded-2xl p-6 shadow-2xl border border-slate-200 space-y-4">
+            <h3 className="text-base font-bold text-rose-800 flex items-center gap-2">
+              <span>⚠️</span> Xác Nhận Xóa Tài Liệu
+            </h3>
+
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Bạn có chắc chắn muốn xóa tài liệu <strong>&quot;{deleteConfirmDoc.displayName}&quot;</strong> không?
+              {deleteConfirmDoc.isActive && (
+                <span className="block mt-1 text-amber-700 font-semibold">
+                  Tài liệu này đang được kích hoạt để phục vụ biên soạn KHDH AI.
+                </span>
+              )}
+            </p>
+
+            <div className="flex justify-end gap-2 border-t pt-3">
+              <button
+                onClick={() => setDeleteConfirmDoc(null)}
+                className="px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg"
+              >
+                Hủy
+              </button>
+              <button
+                onClick={() => handleDeleteDocument(deleteConfirmDoc.id)}
+                className="px-3 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-lg shadow-xs"
+              >
+                Xác Nhận Xóa
+              </button>
             </div>
           </div>
         </div>

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getEnv } from '@/config/env';
 import { GeminiService } from '@/services/ai/gemini.service';
+import { SourceDocumentService } from '@/services/documents/source-document.service';
+import { SourceContextBuilder } from '@/services/documents/source-context-builder';
 import { checkRateLimit } from '@/lib/rate-limiter';
 import { readFile } from 'fs/promises';
 import { join } from 'path';
@@ -20,7 +22,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json().catch(() => ({}));
-    const { command, lessonCode, jobId, apiKey, apiKeys } = body;
+    const { command, lessonCode, jobId, apiKey, apiKeys, documentIds, projectId } = body;
 
     if (!command || typeof command !== 'string') {
       return NextResponse.json(
@@ -42,7 +44,18 @@ export async function POST(request: NextRequest) {
 
     const env = getEnv();
     const activeJobId = jobId || `JOB-${Date.now()}`;
+    const targetProject = projectId || 'default';
 
+    // 1. Lấy danh sách tài liệu nguồn sẵn sàng (Source Documents)
+    let activeDocs = await SourceDocumentService.getActiveReady(targetProject);
+    if (documentIds && Array.isArray(documentIds) && documentIds.length > 0) {
+      activeDocs = activeDocs.filter((d) => documentIds.includes(d.id));
+    }
+
+    const { systemContext: sourceContextText, sourcesUsed } = SourceContextBuilder.buildPromptContext(activeDocs);
+    const readinessReport = SourceContextBuilder.checkReadiness(activeDocs);
+
+    // 2. Đọc file kỹ năng chuyên môn
     let skillContent = '';
     try {
       const skillPath = join(process.cwd(), 'docs', 'agents', '04_KhdhBuilderAgent', 'skill.md');
@@ -69,6 +82,8 @@ export async function POST(request: NextRequest) {
       '4. Công thức toán dùng chuẩn LaTeX $...$ hoặc $$...$$.',
       '5. Hình học chính xác dùng mã TikZ / Overleaf; ảnh minh họa thực tế dùng PROMPT TẠO ẢNH ngay dưới nội dung.',
       '',
+      sourceContextText,
+      '',
       '## HƯỚNG DẪN CHUYÊN MÔN:',
       skillContent,
     ].join('\n');
@@ -78,7 +93,7 @@ export async function POST(request: NextRequest) {
       `MÃ BÀI HỌC: ${lessonCode || 'TỰ ĐỘNG'}`,
       `MÃ CÔNG VIỆC: ${activeJobId}`,
       '',
-      'Hãy thực thi lệnh và tạo bản Kế hoạch bài dạy hoàn chỉnh, chi tiết, đúng định dạng V10.1.',
+      'Hãy thực thi lệnh và tạo bản Kế hoạch bài dạy hoàn chỉnh, chi tiết, đúng định dạng V10.1, tuân thủ nghiêm ngặt các căn cứ tài liệu nguồn và thứ tự ưu tiên đã được cung cấp.',
     ].join('\n');
 
     const result = await GeminiService.generateContent({
@@ -98,6 +113,8 @@ export async function POST(request: NextRequest) {
       model: result.model,
       duration_ms: result.durationMs,
       key_used: result.keyUsed,
+      sources_used: sourcesUsed,
+      source_readiness: readinessReport,
     });
   } catch (error) {
     const errStr = String(error);
