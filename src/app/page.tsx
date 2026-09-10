@@ -69,12 +69,17 @@ export default function Home() {
   const [command, setCommand] = useState('SOAN_XUAT');
   const [lessonCode, setLessonCode] = useState('TOAN-8-HKI-SODAISO-C01-STT01');
   const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'draft' | 'preview' | 'slide' | 'sources' | 'stats'>('draft');
+  const [activeTab, setActiveTab] = useState<'draft' | 'preview' | 'worksheet' | 'slide' | 'sources' | 'stats'>('draft');
   const [error, setError] = useState<string | null>(null);
   const [outputData, setOutputData] = useState<OutputData | null>(null);
   const [pipelineStep, setPipelineStep] = useState<string>('');
   const [exportingWord, setExportingWord] = useState(false);
   const [showWordMenu, setShowWordMenu] = useState(false);
+
+  // Worksheet State
+  const [worksheetMarkdown, setWorksheetMarkdown] = useState<string | null>(null);
+  const [generatingWorksheet, setGeneratingWorksheet] = useState(false);
+  const [exportingWorksheetWord, setExportingWorksheetWord] = useState(false);
 
   // Multi-Key State
   const [showSettings, setShowSettings] = useState(false);
@@ -457,6 +462,81 @@ export default function Home() {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  };
+
+  const handleGenerateWorksheet = async () => {
+    if (!outputData?.khdh_draft) return;
+    setGeneratingWorksheet(true);
+    setError(null);
+    try {
+      const activeKeys = currentParsedKeys.length > 0 ? currentParsedKeys : ApiKeyService.getClientKeys();
+      const res = await fetch('/api/generate-worksheet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          khdhDraft: outputData.khdh_draft,
+          lessonCode: outputData.lesson_code,
+          apiKeys: activeKeys,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || 'Không thể tạo Phiếu học tập.');
+      }
+
+      setWorksheetMarkdown(data.markdown);
+      setActiveTab('worksheet');
+    } catch (err: unknown) {
+      const msg = (err as Error)?.message || 'Lỗi khi tạo Phiếu học tập.';
+      setError(msg);
+    } finally {
+      setGeneratingWorksheet(false);
+    }
+  };
+
+  const handleDownloadWorksheetWord = async () => {
+    if (!worksheetMarkdown) return;
+    setExportingWorksheetWord(true);
+    try {
+      const res = await fetch('/api/export/worksheet-word', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          markdown: worksheetMarkdown,
+          lessonCode: outputData?.lesson_code || 'TOAN-8',
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error('Không thể xuất file Word Phiếu học tập.');
+      }
+
+      const blob = await res.blob();
+      const docxBlob = new Blob([blob], {
+        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      });
+
+      const url = URL.createObjectURL(docxBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `PHT_${outputData?.lesson_code || 'TOAN-8'}_IN_AN_${Date.now()}.docx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err: unknown) {
+      const msg = (err as Error)?.message || 'Lỗi tải Word Phiếu học tập.';
+      setError(msg);
+    } finally {
+      setExportingWorksheetWord(false);
+    }
+  };
+
+  const handleCopyWorksheet = () => {
+    if (!worksheetMarkdown) return;
+    navigator.clipboard.writeText(worksheetMarkdown);
+    alert('Đã sao chép nội dung Phiếu học tập vào Clipboard!');
   };
 
   return (
@@ -899,18 +979,19 @@ export default function Home() {
         <div className="lg:col-span-8">
           <div className="card p-0 overflow-hidden flex flex-col h-full min-h-[600px]">
             {/* Tabs Header */}
-            <div className="flex border-b border-slate-200 bg-slate-100/70 p-1.5 gap-1">
+            <div className="flex border-b border-slate-200 bg-slate-100/70 p-1.5 gap-1 overflow-x-auto">
               {[
                 { id: 'draft', label: '📝 Bản Thảo KHDH' },
                 { id: 'preview', label: '📐 Xem Trước 2 Cột' },
+                { id: 'worksheet', label: '📋 Phiếu Học Tập' },
                 { id: 'slide', label: '📊 Slide & Canva' },
                 { id: 'sources', label: '📚 Nguồn Sử Dụng' },
                 { id: 'stats', label: '📈 Thống Kê & Key' },
               ].map((tab) => (
                 <button
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id as 'draft' | 'preview' | 'slide' | 'sources' | 'stats')}
-                  className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all ${
+                  onClick={() => setActiveTab(tab.id as 'draft' | 'preview' | 'worksheet' | 'slide' | 'sources' | 'stats')}
+                  className={`flex-1 min-w-[110px] py-2 px-2.5 rounded-lg text-xs font-bold transition-all ${
                     activeTab === tab.id
                       ? 'bg-white text-blue-700 shadow-sm'
                       : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
@@ -958,6 +1039,118 @@ export default function Home() {
                       <div className="font-mono text-xs whitespace-pre-wrap bg-white p-4 border rounded-xl">
                         {outputData.khdh_draft}
                       </div>
+                    </div>
+                  )}
+
+                  {activeTab === 'worksheet' && (
+                    <div className="space-y-4">
+                      {/* Action & Status Header */}
+                      <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-xl flex flex-col sm:flex-row justify-between sm:items-center gap-3">
+                        <div>
+                          <h3 className="text-sm font-bold text-emerald-950 flex items-center gap-2">
+                            <span>📋</span> PHIẾU HỌC TẬP PHÂN HÓA 3 MỨC ĐỘ
+                          </h3>
+                          <p className="text-xs text-emerald-800 mt-0.5">
+                            Tự động bóc tách từ KHDH: Khung ghi nhớ, Bài tập Mức 1-2-3, Dòng kẻ chấm in ấn &amp; Rubric
+                          </p>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            onClick={handleGenerateWorksheet}
+                            disabled={generatingWorksheet}
+                            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1.5"
+                          >
+                            {generatingWorksheet ? (
+                              <>
+                                <span className="animate-spin inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full" />
+                                <span>Đang tạo PHT...</span>
+                              </>
+                            ) : (
+                              <>
+                                <span>⚡</span>
+                                <span>{worksheetMarkdown ? 'Tạo Lại PHT' : 'Tạo Phiếu Học Tập'}</span>
+                              </>
+                            )}
+                          </button>
+
+                          {worksheetMarkdown && (
+                            <>
+                              <button
+                                onClick={handleCopyWorksheet}
+                                className="px-3 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1"
+                              >
+                                <span>📋</span> Sao chép
+                              </button>
+                              <button
+                                onClick={handleDownloadWorksheetWord}
+                                disabled={exportingWorksheetWord}
+                                className="px-3.5 py-2 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1.5"
+                              >
+                                {exportingWorksheetWord ? (
+                                  <>
+                                    <span className="animate-spin inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full" />
+                                    <span>Đang xuất Word...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <span>📥</span>
+                                    <span>Tải Word PHT (Chuẩn in)</span>
+                                  </>
+                                )}
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Content Preview */}
+                      {generatingWorksheet && (
+                        <div className="h-64 flex flex-col items-center justify-center text-center space-y-4">
+                          <div className="animate-spin w-10 h-10 border-4 border-emerald-600 border-t-transparent rounded-full" />
+                          <div>
+                            <p className="font-bold text-slate-800">Đang phân tích KHDH &amp; tạo Phiếu học tập phân hóa...</p>
+                            <p className="text-xs text-slate-500 mt-1">Trích xuất kiến thức trọng tâm, bài tập 3 mức độ và dòng kẻ in ấn...</p>
+                          </div>
+                        </div>
+                      )}
+
+                      {!generatingWorksheet && !worksheetMarkdown && (
+                        <div className="p-8 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-300 space-y-3">
+                          <span className="text-4xl">📄</span>
+                          <h4 className="font-bold text-slate-800 text-sm">Chưa tạo Phiếu học tập cho bài này</h4>
+                          <p className="text-xs text-slate-500 max-w-md mx-auto">
+                            Nhấn nút &quot;Tạo Phiếu Học Tập&quot; ở trên để AI tự động bóc tách bản thảo KHDH thành Phiếu học tập 3 mức độ sẵn sàng in ấn cho học sinh.
+                          </p>
+                          <button
+                            onClick={handleGenerateWorksheet}
+                            className="btn-primary text-xs px-4 py-2 inline-flex items-center gap-1.5"
+                          >
+                            <span>🚀</span> Tạo Phiếu Học Tập Ngay
+                          </button>
+                        </div>
+                      )}
+
+                      {!generatingWorksheet && worksheetMarkdown && (
+                        <div className="space-y-4">
+                          {/* Student Header Mockup */}
+                          <div className="p-4 bg-white border border-slate-200 rounded-xl space-y-2 text-xs">
+                            <div className="flex justify-between font-bold text-slate-800 border-b pb-2">
+                              <span>TRƯỜNG THCS QUANG TRUNG — TỔ TOÁN TIN</span>
+                              <span>NĂM HỌC 2026 - 2027</span>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-slate-600 pt-1">
+                              <div>Họ và tên học sinh: ................................................................</div>
+                              <div>Lớp: 8A.....  Nhóm: ........  Thời gian: 15-20 phút</div>
+                            </div>
+                          </div>
+
+                          {/* Markdown Body */}
+                          <div className="font-mono text-xs whitespace-pre-wrap leading-relaxed text-slate-800 bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
+                            {worksheetMarkdown}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
 
