@@ -5,6 +5,7 @@ import { ApiKeyService } from '@/services/ai/api-key.service';
 import type { MultiKeyTestResult } from '@/services/ai/ai.types';
 import type { SourceDocument, SourceDocumentType, SourceReadinessReport } from '@/types/source-document';
 import type { VideoStoryboardData } from '@/types/video-storyboard.types';
+import type { LessonRequirementAnalysis } from '@/types/lesson-analysis.types';
 
 const COMMANDS = [
   { id: 'KHOI_DONG', label: '🚀 Khởi động', desc: 'Lập chỉ mục nguồn & kiểm tra hệ thống' },
@@ -91,6 +92,12 @@ export default function Home() {
   const [storyboardData, setStoryboardData] = useState<VideoStoryboardData | null>(null);
   const [generatingStoryboard, setGeneratingStoryboard] = useState(false);
   const [copiedTarget, setCopiedTarget] = useState<string | null>(null);
+
+  // Lesson Requirement Analysis & Locked Configuration State
+  const [lessonAnalysis, setLessonAnalysis] = useState<LessonRequirementAnalysis | null>(null);
+  const [analyzingLesson, setAnalyzingLesson] = useState(false);
+  const [showAnalysisModal, setShowAnalysisModal] = useState(false);
+  const [isConfigLocked, setIsConfigLocked] = useState(false);
 
   // Multi-Key State
   const [showSettings, setShowSettings] = useState(false);
@@ -323,7 +330,59 @@ export default function Home() {
     setCommand(cmdId);
   };
 
-  const handleSubmit = async (e?: React.FormEvent) => {
+  const handleAnalyzeLesson = async () => {
+    if (!lessonCode.trim()) {
+      setError('Vui lòng nhập Mã bài học hoặc Tên bài cần phân tích.');
+      return;
+    }
+
+    setAnalyzingLesson(true);
+    setError(null);
+
+    try {
+      const activeKeys = currentParsedKeys.length > 0 ? currentParsedKeys : ApiKeyService.getClientKeys();
+      const activeDocIds = documents.filter((d) => d.isActive && d.status === 'READY').map((d) => d.id);
+
+      const res = await fetch('/api/analyze-lesson', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lessonCode: lessonCode.trim(),
+          command: command.trim(),
+          apiKeys: activeKeys,
+          documentIds: activeDocIds,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || 'Không thể phân tích yêu cầu bài học.');
+      }
+
+      setLessonAnalysis(data.analysis);
+      setShowAnalysisModal(true);
+    } catch (err: unknown) {
+      const msg = (err as Error)?.message || 'Lỗi khi phân tích yêu cầu bài học.';
+      setError(msg);
+    } finally {
+      setAnalyzingLesson(false);
+    }
+  };
+
+  const handleLockConfig = (executeImmediately: boolean = false) => {
+    if (!lessonAnalysis) return;
+    setIsConfigLocked(true);
+    setShowAnalysisModal(false);
+    if (executeImmediately) {
+      handleSubmit(undefined, lessonAnalysis);
+    }
+  };
+
+  const handleUnlockConfig = () => {
+    setIsConfigLocked(false);
+  };
+
+  const handleSubmit = async (e?: React.FormEvent, configOverride?: LessonRequirementAnalysis) => {
     if (e) e.preventDefault();
     if (loading) return;
 
@@ -349,15 +408,18 @@ export default function Home() {
 
       setPipelineStep('Đang điều phối Agent & thực thi (Bám sát căn cứ tài liệu nguồn & Xoay vòng Key)...');
 
+      const targetConfig = configOverride || (isConfigLocked ? lessonAnalysis : undefined);
+
       const res = await fetch('/api/generate-khdh', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           command: command.trim(),
-          lessonCode: lessonCode.trim(),
+          lessonCode: targetConfig?.lessonTitle || lessonCode.trim(),
           jobId,
           apiKeys: activeKeys,
           documentIds: activeDocIds,
+          lockedConfig: targetConfig,
         }),
         signal: controller.signal,
       });
@@ -1124,11 +1186,89 @@ export default function Home() {
                 id="lesson-input"
                 rows={3}
                 value={lessonCode}
-                onChange={(e) => setLessonCode(e.target.value)}
-                disabled={loading}
+                onChange={(e) => {
+                  setLessonCode(e.target.value);
+                  if (isConfigLocked) setIsConfigLocked(false);
+                }}
+                disabled={loading || analyzingLesson}
                 className="input-field text-sm"
-                placeholder="Ví dụ: TOAN-8-HKI-SODAISO-C01-STT01 (Đơn thức và đa thức)"
+                placeholder="Ví dụ: TOAN-8-HKI-SODAISO-C01-STT01 hoặc Đơn thức và đa thức nhiều biến - 2 tiết"
               />
+            </div>
+
+            {/* Pre-Analysis Action Button & Locked State Badge */}
+            <div className="space-y-2">
+              {!isConfigLocked && (
+                <button
+                  type="button"
+                  onClick={handleAnalyzeLesson}
+                  disabled={analyzingLesson || loading}
+                  className="w-full py-2.5 px-3 bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-300 rounded-xl text-xs font-bold transition-all shadow-2xs flex items-center justify-center gap-2"
+                >
+                  {analyzingLesson ? (
+                    <>
+                      <span className="animate-spin inline-block w-3.5 h-3.5 border-2 border-purple-700 border-t-transparent rounded-full" />
+                      <span>Đang phân tích căn cứ PL1/PPCT/SGK...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>🔍</span>
+                      <span>Phân tích yêu cầu &amp; Cố định cấu hình</span>
+                    </>
+                  )}
+                </button>
+              )}
+
+              {isConfigLocked && lessonAnalysis && (
+                <div className="p-3 bg-emerald-50/90 border border-emerald-300 rounded-xl space-y-2 text-xs shadow-2xs">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-emerald-950 flex items-center gap-1.5 text-xs">
+                      <span className="text-sm">🔒</span> CẤU HÌNH ĐÃ CỐ ĐỊNH
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowAnalysisModal(true)}
+                      className="text-emerald-700 hover:text-emerald-900 font-bold text-[11px] underline"
+                    >
+                      Chi tiết
+                    </button>
+                  </div>
+
+                  <div className="font-bold text-slate-900 text-xs leading-snug">
+                    {lessonAnalysis.lessonTitle}
+                  </div>
+
+                  <div className="text-[11px] text-slate-600 flex flex-wrap gap-1.5">
+                    <span className="bg-white px-2 py-0.5 rounded border border-emerald-200 font-medium">
+                      ⏱️ {lessonAnalysis.totalPeriods} tiết
+                    </span>
+                    <span className="bg-white px-2 py-0.5 rounded border border-emerald-200 font-medium">
+                      📚 {lessonAnalysis.grade} ({lessonAnalysis.term})
+                    </span>
+                  </div>
+
+                  <div className="text-[11px] text-emerald-800">
+                    ✓ Đã khóa {lessonAnalysis.objectives.knowledge.length} YCCĐ kiến thức &amp; {lessonAnalysis.objectives.competencies.length} năng lực.
+                  </div>
+
+                  <div className="pt-1 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={handleUnlockConfig}
+                      className="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-600 rounded-lg border border-slate-300 text-[11px] font-medium"
+                    >
+                      Mở khóa
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowAnalysisModal(true)}
+                      className="px-3 py-1 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-[11px] font-bold flex-1 text-center"
+                    >
+                      ✏️ Chỉnh sửa cấu hình
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Action Buttons */}
@@ -2247,6 +2387,280 @@ export default function Home() {
               >
                 Xác Nhận Xóa
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Lesson Requirement Analysis & Locked Configuration Modal */}
+      {showAnalysisModal && lessonAnalysis && (
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs z-50 flex items-center justify-center p-3 md:p-6 overflow-y-auto">
+          <div className="bg-white max-w-2xl w-full rounded-2xl p-6 shadow-2xl border border-slate-200 space-y-5 max-h-[90vh] overflow-y-auto">
+            {/* Modal Header */}
+            <div className="flex justify-between items-start border-b border-slate-200 pb-3">
+              <div>
+                <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                  <span>🔍</span> Phân Tích Yêu Cầu &amp; Cố Định Cấu Hình Bài Học
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Bóc tách từ Chương trình GDPT 2018 &amp; Căn cứ tài liệu nguồn (Phụ lục I, PPCT, SGK)
+                </p>
+              </div>
+              <button
+                onClick={() => setShowAnalysisModal(false)}
+                className="text-slate-400 hover:text-slate-600 font-bold text-xl leading-none"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Body Form */}
+            <div className="space-y-4 text-xs">
+              {/* 1. Tên bài & Thời lượng */}
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+                <div className="font-bold text-slate-800 flex items-center gap-1.5">
+                  <span>📌</span> 1. Thông tin bài dạy chuẩn:
+                </div>
+
+                <div>
+                  <label className="block text-slate-600 font-semibold mb-1">
+                    Tên bài học chuẩn:
+                  </label>
+                  <input
+                    type="text"
+                    value={lessonAnalysis.lessonTitle}
+                    onChange={(e) =>
+                      setLessonAnalysis({ ...lessonAnalysis, lessonTitle: e.target.value })
+                    }
+                    className="input-field text-xs font-bold text-slate-800"
+                  />
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <label className="block text-slate-600 font-semibold mb-1">Số tiết:</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={10}
+                      value={lessonAnalysis.totalPeriods}
+                      onChange={(e) =>
+                        setLessonAnalysis({
+                          ...lessonAnalysis,
+                          totalPeriods: parseInt(e.target.value) || 1,
+                        })
+                      }
+                      className="input-field text-xs font-bold text-center"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-600 font-semibold mb-1">Khối lớp:</label>
+                    <input
+                      type="text"
+                      value={lessonAnalysis.grade}
+                      onChange={(e) =>
+                        setLessonAnalysis({ ...lessonAnalysis, grade: e.target.value })
+                      }
+                      className="input-field text-xs text-center"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-600 font-semibold mb-1">Học kỳ:</label>
+                    <input
+                      type="text"
+                      value={lessonAnalysis.term}
+                      onChange={(e) =>
+                        setLessonAnalysis({ ...lessonAnalysis, term: e.target.value })
+                      }
+                      className="input-field text-xs text-center"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-slate-600 font-semibold mb-1">
+                    Phân bổ nội dung từng tiết:
+                  </label>
+                  <div className="space-y-1.5">
+                    {lessonAnalysis.periodBreakdown.map((periodText, pIdx) => (
+                      <input
+                        key={pIdx}
+                        type="text"
+                        value={periodText}
+                        onChange={(e) => {
+                          const updated = [...lessonAnalysis.periodBreakdown];
+                          updated[pIdx] = e.target.value;
+                          setLessonAnalysis({ ...lessonAnalysis, periodBreakdown: updated });
+                        }}
+                        className="input-field text-xs"
+                      />
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* 2. Yêu cầu cần đạt (YCCĐ) */}
+              <div className="p-4 bg-blue-50/60 border border-blue-200 rounded-xl space-y-3">
+                <div className="font-bold text-blue-950 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <span>🎯</span> 2. Yêu cầu cần đạt (YCCĐ) cố định:
+                  </span>
+                  <span className="text-[11px] text-blue-700 font-normal">
+                    AI sẽ tuân thủ nghiêm ngặt các mục này
+                  </span>
+                </div>
+
+                {/* Kiến thức */}
+                <div>
+                  <span className="font-bold text-slate-700 block mb-1">a) Về Kiến thức:</span>
+                  <div className="space-y-1 bg-white p-2.5 rounded-lg border border-blue-100">
+                    {lessonAnalysis.objectives.knowledge.map((k, kIdx) => (
+                      <div key={kIdx} className="flex items-center gap-2 text-slate-800">
+                        <span className="text-blue-600 font-bold">•</span>
+                        <input
+                          type="text"
+                          value={k}
+                          onChange={(e) => {
+                            const updated = [...lessonAnalysis.objectives.knowledge];
+                            updated[kIdx] = e.target.value;
+                            setLessonAnalysis({
+                              ...lessonAnalysis,
+                              objectives: { ...lessonAnalysis.objectives, knowledge: updated },
+                            });
+                          }}
+                          className="flex-1 bg-transparent border-b border-transparent hover:border-slate-200 focus:border-blue-400 outline-hidden py-0.5 text-xs"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Năng lực */}
+                <div>
+                  <span className="font-bold text-slate-700 block mb-1">b) Về Năng lực toán học:</span>
+                  <div className="space-y-1 bg-white p-2.5 rounded-lg border border-blue-100">
+                    {lessonAnalysis.objectives.competencies.map((c, cIdx) => (
+                      <div key={cIdx} className="flex items-center gap-2 text-slate-800">
+                        <span className="text-emerald-600 font-bold">•</span>
+                        <input
+                          type="text"
+                          value={c}
+                          onChange={(e) => {
+                            const updated = [...lessonAnalysis.objectives.competencies];
+                            updated[cIdx] = e.target.value;
+                            setLessonAnalysis({
+                              ...lessonAnalysis,
+                              objectives: { ...lessonAnalysis.objectives, competencies: updated },
+                            });
+                          }}
+                          className="flex-1 bg-transparent border-b border-transparent hover:border-slate-200 focus:border-blue-400 outline-hidden py-0.5 text-xs"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Phẩm chất */}
+                <div>
+                  <span className="font-bold text-slate-700 block mb-1">c) Về Phẩm chất:</span>
+                  <div className="space-y-1 bg-white p-2.5 rounded-lg border border-blue-100">
+                    {lessonAnalysis.objectives.qualities.map((q, qIdx) => (
+                      <div key={qIdx} className="flex items-center gap-2 text-slate-800">
+                        <span className="text-purple-600 font-bold">•</span>
+                        <input
+                          type="text"
+                          value={q}
+                          onChange={(e) => {
+                            const updated = [...lessonAnalysis.objectives.qualities];
+                            updated[qIdx] = e.target.value;
+                            setLessonAnalysis({
+                              ...lessonAnalysis,
+                              objectives: { ...lessonAnalysis.objectives, qualities: updated },
+                            });
+                          }}
+                          className="flex-1 bg-transparent border-b border-transparent hover:border-slate-200 focus:border-blue-400 outline-hidden py-0.5 text-xs"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* 3. Khái niệm & Phương pháp */}
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                <div className="font-bold text-slate-800 flex items-center gap-1.5">
+                  <span>💡</span> 3. Khái niệm trọng tâm &amp; Phương pháp dạy học:
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                  <div>
+                    <span className="font-semibold text-slate-600 block mb-1">Khái niệm cốt lõi:</span>
+                    <div className="bg-white p-2 rounded-lg border text-[11px] text-slate-700 space-y-1">
+                      {lessonAnalysis.keyConcepts.map((kc, kcIdx) => (
+                        <div key={kcIdx} className="flex items-center gap-1.5">
+                          <span className="text-amber-500 font-bold">✓</span> {kc}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <span className="font-semibold text-slate-600 block mb-1">Phương pháp sư phạm:</span>
+                    <div className="bg-white p-2 rounded-lg border text-[11px] text-slate-700 space-y-1">
+                      {lessonAnalysis.pedagogicalMethods.map((pm, pmIdx) => (
+                        <div key={pmIdx} className="flex items-center gap-1.5">
+                          <span className="text-indigo-500 font-bold">✓</span> {pm}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 4. Ghi chú riêng */}
+              <div>
+                <label className="block text-slate-600 font-semibold mb-1">
+                  Ghi chú hoặc yêu cầu riêng của bạn cho bài này:
+                </label>
+                <input
+                  type="text"
+                  value={lessonAnalysis.customNotes || ''}
+                  onChange={(e) =>
+                    setLessonAnalysis({ ...lessonAnalysis, customNotes: e.target.value })
+                  }
+                  placeholder="Ví dụ: Tăng cường bài toán thực tế về kinh tế, dùng phương pháp khăn trải bàn..."
+                  className="input-field text-xs"
+                />
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex flex-col sm:flex-row items-center justify-between border-t border-slate-200 pt-4 gap-3">
+              <button
+                type="button"
+                onClick={() => setShowAnalysisModal(false)}
+                className="w-full sm:w-auto px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg border border-slate-200"
+              >
+                Đóng
+              </button>
+
+              <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
+                <button
+                  type="button"
+                  onClick={() => handleLockConfig(false)}
+                  className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5"
+                >
+                  <span>🔒</span>
+                  <span>Lưu &amp; Cố Định Cấu Hình</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleLockConfig(true)}
+                  className="px-4 py-2.5 bg-blue-700 hover:bg-blue-800 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5"
+                >
+                  <span>🚀</span>
+                  <span>Cố Định &amp; Thực Thi KHDH Ngay</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>

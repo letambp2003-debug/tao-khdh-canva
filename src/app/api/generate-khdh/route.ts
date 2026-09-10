@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json().catch(() => ({}));
-    const { command, lessonCode, jobId, apiKey, apiKeys, documentIds, projectId } = body;
+    const { command, lessonCode, jobId, apiKey, apiKeys, documentIds, projectId, lockedConfig } = body;
 
     if (!command || typeof command !== 'string') {
       return NextResponse.json(
@@ -56,6 +56,27 @@ export async function POST(request: NextRequest) {
     const { systemContext: sourceContextText, sourcesUsed } = SourceContextBuilder.buildPromptContext(activeDocs);
     const readinessReport = SourceContextBuilder.checkReadiness(activeDocs);
 
+    // Xây dựng khối cấu hình cố định (nếu giáo viên đã khóa cấu hình)
+    let lockedConfigSection = '';
+    if (lockedConfig && typeof lockedConfig === 'object') {
+      lockedConfigSection = [
+        '',
+        '## 🔒 CẤU HÌNH YÊU CẦU ĐÃ ĐƯỢC GIÁO VIÊN CỐ ĐỊNH (BẮT BUỘC TUÂN THỦ 100%):',
+        `- Tên bài học chuẩn: ${lockedConfig.lessonTitle || ''}`,
+        `- Mã bài học: ${lockedConfig.lessonCode || lessonCode || ''}`,
+        `- Khối lớp & Học kỳ: ${lockedConfig.grade || 'Lớp 8'} - ${lockedConfig.subject || 'Toán học'} (${lockedConfig.term || 'Học kỳ I'})`,
+        `- Tổng số tiết: ${lockedConfig.totalPeriods || 2} tiết`,
+        `- Phân phối từng tiết: ${(lockedConfig.periodBreakdown || []).join(' | ')}`,
+        `- Yêu cầu cần đạt về KIẾN THỨC: ${(lockedConfig.objectives?.knowledge || []).join('; ')}`,
+        `- Yêu cầu cần đạt về NĂNG LỰC: ${(lockedConfig.objectives?.competencies || []).join('; ')}`,
+        `- Yêu cầu cần đạt về PHẨM CHẤT: ${(lockedConfig.objectives?.qualities || []).join('; ')}`,
+        `- Khái niệm trọng tâm: ${(lockedConfig.keyConcepts || []).join(', ')}`,
+        `- Phương pháp dạy học: ${(lockedConfig.pedagogicalMethods || []).join(', ')}`,
+        lockedConfig.customNotes ? `- Ghi chú riêng: ${lockedConfig.customNotes}` : '',
+        '',
+      ].join('\n');
+    }
+
     // 2. Đọc file kỹ năng chuyên môn
     let skillContent = '';
     try {
@@ -84,6 +105,8 @@ export async function POST(request: NextRequest) {
       '5. Hình học chính xác dùng mã TikZ / Overleaf; ảnh minh họa thực tế dùng PROMPT TẠO ẢNH ngay dưới nội dung.',
       '6. TUYỆT ĐỐI KHÔNG xuất khối JSON AgentMessage, metadata JSON hay code block markdown ở đầu bản thảo. Bắt đầu trực tiếp bằng tiêu đề giáo án `# KẾ HOẠCH BÀI DẠY: ...`.',
       '',
+      lockedConfigSection,
+      '',
       sourceContextText,
       '',
       '## HƯỚNG DẪN CHUYÊN MÔN:',
@@ -92,10 +115,11 @@ export async function POST(request: NextRequest) {
 
     const userMessage = [
       `LỆNH THỰC THI: ${command} ${lessonCode || ''}`,
-      `MÃ BÀI HỌC: ${lessonCode || 'TỰ ĐỘNG'}`,
+      `MÃ BÀI HỌC: ${lockedConfig?.lessonTitle || lessonCode || 'TỰ ĐỘNG'}`,
       `MÃ CÔNG VIỆC: ${activeJobId}`,
+      lockedConfigSection,
       '',
-      'Hãy thực thi lệnh và tạo bản Kế hoạch bài dạy hoàn chỉnh, chi tiết, đúng định dạng V10.1, tuân thủ nghiêm ngặt các căn cứ tài liệu nguồn và thứ tự ưu tiên đã được cung cấp. Bắt đầu trực tiếp bằng # KẾ HOẠCH BÀI DẠY.',
+      'Hãy thực thi lệnh và tạo bản Kế hoạch bài dạy hoàn chỉnh, chi tiết, đúng định dạng V10.1, tuân thủ nghiêm ngặt các căn cứ tài liệu nguồn và Cấu hình đã được cố định ở trên. Bắt đầu trực tiếp bằng # KẾ HOẠCH BÀI DẠY.',
     ].join('\n');
 
     const result = await GeminiService.generateContent({
