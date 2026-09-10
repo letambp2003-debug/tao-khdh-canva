@@ -8,10 +8,12 @@ export interface StoryboardScene {
   title: string;
   duration: string;
   visualDescription: string;
-  voiceoverScript: string;
   onScreenText: string;
-  aiVideoPrompt: string; // Runway Gen-3 Alpha / Kling AI / Sora prompt in English
-  audioPrompt: string;   // Sound effects & BGM guidance
+  imagePrompt: string;    // Prompt tạo ảnh Keyframe (Midjourney v6 / Flux / DALL-E 3)
+  videoPrompt: string;    // Prompt tạo chuyển động Video (Runway Gen-3 Alpha / Kling 1.5 / Sora)
+  aiVideoPrompt?: string; // Legacy alias for videoPrompt
+  voiceoverScript: string;// Lời thoại / Thuyết minh tiếng Việt chuẩn sư phạm
+  audioPrompt: string;    // Nhạc nền BGM & Hiệu ứng âm thanh SFX
 }
 
 export interface VideoStoryboardData {

@@ -90,8 +90,7 @@ export default function Home() {
   // Video Storyboard State
   const [storyboardData, setStoryboardData] = useState<VideoStoryboardData | null>(null);
   const [generatingStoryboard, setGeneratingStoryboard] = useState(false);
-  const [copiedPromptIndex, setCopiedPromptIndex] = useState<number | null>(null);
-  const [copiedMasterPrompt, setCopiedMasterPrompt] = useState(false);
+  const [copiedTarget, setCopiedTarget] = useState<string | null>(null);
 
   // Multi-Key State
   const [showSettings, setShowSettings] = useState(false);
@@ -628,28 +627,98 @@ export default function Home() {
     }
   };
 
-  const handleCopyScenePrompt = (promptText: string, sceneIndex: number) => {
-    navigator.clipboard.writeText(promptText);
-    setCopiedPromptIndex(sceneIndex);
+  const handleCopySnippet = (text: string, targetKey: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedTarget(targetKey);
     setTimeout(() => {
-      setCopiedPromptIndex(null);
+      setCopiedTarget(null);
     }, 2000);
   };
 
-  const handleCopyAllPrompts = () => {
-    if (!storyboardData?.scenes) return;
-    const allPrompts = storyboardData.scenes
-      .map(
-        (s) =>
-          `=== ${s.title} (${s.duration}) ===\nPROMPT:\n${s.aiVideoPrompt}\nVOICEOVER:\n${s.voiceoverScript}\n`
-      )
-      .join('\n----------------------------------------\n\n');
+  const handleCopyFullScene = (scene: any, sceneIndex: number) => {
+    const sceneCodeText = [
+      `// ==========================================`,
+      `// CẢNH ${scene.sceneNumber}: ${scene.title.toUpperCase()} (${scene.duration})`,
+      `// ==========================================`,
+      ``,
+      `// [1. PROMPT ẢNH KEYFRAME - MIDJOURNEY / FLUX / DALL-E 3]`,
+      scene.imagePrompt || scene.videoPrompt || '',
+      ``,
+      `// [2. PROMPT VIDEO CHUYỂN ĐỘNG - RUNWAY GEN-3 / KLING 1.5 / SORA]`,
+      scene.videoPrompt || scene.aiVideoPrompt || '',
+      ``,
+      `// [3. LỜI THOẠI THUYẾT MINH TIẾNG VIỆT]`,
+      scene.voiceoverScript || '',
+      ``,
+      `// [4. CHỮ / CÔNG THỨC TRÊN MÀN HÌNH]`,
+      scene.onScreenText || '',
+      ``,
+      `// [5. ÂM THANH / NHẠC NỀN BGM]`,
+      scene.audioPrompt || '',
+    ].join('\n');
 
-    navigator.clipboard.writeText(allPrompts);
-    setCopiedMasterPrompt(true);
-    setTimeout(() => {
-      setCopiedMasterPrompt(false);
-    }, 2500);
+    handleCopySnippet(sceneCodeText, `scene_full_${sceneIndex}`);
+  };
+
+  const handleCopyAllVideoPrompts = () => {
+    if (!storyboardData?.scenes) return;
+    const allVideoPrompts = storyboardData.scenes
+      .map((s) => `// --- CẢNH ${s.sceneNumber}: ${s.title} (${s.duration}) ---\n${s.videoPrompt || s.aiVideoPrompt || ''}\n`)
+      .join('\n');
+    handleCopySnippet(allVideoPrompts, 'all_video_prompts');
+  };
+
+  const handleCopyAllImagePrompts = () => {
+    if (!storyboardData?.scenes) return;
+    const allImgPrompts = storyboardData.scenes
+      .map((s) => `// --- CẢNH ${s.sceneNumber}: ${s.title} (${s.duration}) ---\n${s.imagePrompt || s.videoPrompt || ''}\n`)
+      .join('\n');
+    handleCopySnippet(allImgPrompts, 'all_img_prompts');
+  };
+
+  const handleCopyAllVoiceovers = () => {
+    if (!storyboardData?.scenes) return;
+    const allVoiceovers = storyboardData.scenes
+      .map((s) => `[Cảnh ${s.sceneNumber} - ${s.duration}]: "${s.voiceoverScript}"\n`)
+      .join('\n');
+    handleCopySnippet(allVoiceovers, 'all_voiceovers');
+  };
+
+  const handleCopyFullCodeText = () => {
+    if (!storyboardData?.scenes) return;
+    const fullCodeText = [
+      `/* =========================================================================`,
+      ` * KỊCH BẢN VIDEO MICRO-LEARNING & BỘ PROMPTS AI TỔNG HỢP`,
+      ` * BÀI HỌC: ${storyboardData.lessonTitle}`,
+      ` * MÃ BÀI HỌC: ${storyboardData.lessonCode}`,
+      ` * TỔNG THỜI LƯỢNG: ${storyboardData.totalDuration}`,
+      ` * PHONG CÁCH: ${storyboardData.videoStyle}`,
+      ` * ĐỐI TƯỢNG: ${storyboardData.targetAudience}`,
+      ` * ========================================================================= */`,
+      ``,
+      ...storyboardData.scenes.map((s) =>
+        [
+          `// ==========================================`,
+          `// CẢNH ${s.sceneNumber}: ${s.title.toUpperCase()} (${s.duration})`,
+          `// ==========================================`,
+          `// 👁️ MÔ TẢ HÌNH ẢNH: ${s.visualDescription}`,
+          `// 📺 HIỂN THỊ MÀN HÌNH: ${s.onScreenText}`,
+          `// 🎵 ÂM THANH / BGM: ${s.audioPrompt}`,
+          ``,
+          `// 🖼️ [PROMPT ẢNH KEYFRAME - MIDJOURNEY / FLUX]:`,
+          s.imagePrompt || s.videoPrompt || '',
+          ``,
+          `// 🎬 [PROMPT VIDEO CHUYỂN ĐỘNG - RUNWAY / KLING / SORA]:`,
+          s.videoPrompt || s.aiVideoPrompt || '',
+          ``,
+          `// 🎙️ [LỜI THOẠI THUYẾT MINH TIẾNG VIỆT]:`,
+          `"${s.voiceoverScript}"`,
+          `\n`,
+        ].join('\n')
+      ),
+    ].join('\n');
+
+    handleCopySnippet(fullCodeText, 'all_full_code');
   };
 
   const handleDownloadStoryboardMd = () => {
@@ -663,13 +732,16 @@ export default function Home() {
       `\n---\n`,
       ...storyboardData.scenes.map((s) =>
         [
-          `## ${s.title} (${s.duration})`,
+          `## Cảnh ${s.sceneNumber}: ${s.title} (${s.duration})`,
           `- **Mô tả thị giác:** ${s.visualDescription}`,
           `- **Chữ hiển thị:** ${s.onScreenText}`,
-          `- **Lời thoại:** ${s.voiceoverScript}`,
           `- **Âm thanh / BGM:** ${s.audioPrompt}`,
-          `- **AI Video Prompt (Runway/Kling/Sora):**`,
-          `\`\`\`text\n${s.aiVideoPrompt}\n\`\`\``,
+          `- **Lời thoại tiếng Việt:**`,
+          `> "${s.voiceoverScript}"`,
+          `- **Prompt Ảnh Keyframe (Midjourney / Flux):**`,
+          `\`\`\`text\n${s.imagePrompt || s.videoPrompt || ''}\n\`\`\``,
+          `- **Prompt Video Chuyển động (Runway / Kling / Sora):**`,
+          `\`\`\`text\n${s.videoPrompt || s.aiVideoPrompt || ''}\n\`\`\``,
           `\n`,
         ].join('\n')
       ),
@@ -1402,54 +1474,104 @@ export default function Home() {
                   {activeTab === 'storyboard' && (
                     <div className="space-y-4">
                       {/* Action & Control Bar */}
-                      <div className="p-4 bg-purple-50/80 border border-purple-200 rounded-xl flex flex-col sm:flex-row justify-between sm:items-center gap-3">
-                        <div>
-                          <h3 className="text-sm font-bold text-purple-950 flex items-center gap-2">
-                            <span>🎬</span> KỊCH BẢN STORYBOARD &amp; PROMPTS AI VIDEO (RUNWAY GEN-3 / KLING / SORA)
-                          </h3>
-                          <p className="text-xs text-purple-800 mt-0.5">
-                            Phân cảnh 5 bước Micro-learning, lời thoại sư phạm &amp; bộ prompt tiếng Anh cinematic 3D chuẩn 1-Click
-                          </p>
-                        </div>
+                      <div className="p-4 bg-purple-50/80 border border-purple-200 rounded-xl flex flex-col gap-3">
+                        <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3">
+                          <div>
+                            <h3 className="text-sm font-bold text-purple-950 flex items-center gap-2">
+                              <span>🎬</span> KỊCH BẢN VIDEO &amp; BỘ PROMPT AI (ẢNH, VIDEO, LỜI THOẠI TIẾNG VIỆT)
+                            </h3>
+                            <p className="text-xs text-purple-800 mt-0.5">
+                              Mỗi phân cảnh tích hợp đủ 3 thành phần: Prompt Ảnh (Midjourney/Flux), Prompt Video (Runway/Kling/Sora), Lời thoại tiếng Việt chuẩn sư phạm
+                            </p>
+                          </div>
 
-                        <div className="flex flex-wrap items-center gap-2">
-                          <button
-                            onClick={handleGenerateStoryboard}
-                            disabled={generatingStoryboard}
-                            className="px-3.5 py-2 bg-purple-700 hover:bg-purple-800 text-white rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1.5"
-                          >
-                            {generatingStoryboard ? (
-                              <>
-                                <span className="animate-spin inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full" />
-                                <span>Đang viết kịch bản...</span>
-                              </>
-                            ) : (
-                              <>
-                                <span>⚡</span>
-                                <span>{storyboardData ? 'Tạo Lại Kịch Bản' : 'Tạo Kịch Bản Video'}</span>
-                              </>
-                            )}
-                          </button>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button
+                              onClick={handleGenerateStoryboard}
+                              disabled={generatingStoryboard}
+                              className="px-3.5 py-2 bg-purple-700 hover:bg-purple-800 text-white rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1.5"
+                            >
+                              {generatingStoryboard ? (
+                                <>
+                                  <span className="animate-spin inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full" />
+                                  <span>Đang viết kịch bản...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <span>⚡</span>
+                                  <span>{storyboardData ? 'Tạo Lại Kịch Bản' : 'Tạo Kịch Bản Video'}</span>
+                                </>
+                              )}
+                            </button>
 
-                          {storyboardData && (
-                            <>
-                              <button
-                                onClick={handleCopyAllPrompts}
-                                className="px-3 py-2 bg-white hover:bg-purple-50 text-purple-900 border border-purple-300 rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1.5"
-                              >
-                                <span>{copiedMasterPrompt ? '✓' : '📋'}</span>
-                                <span>{copiedMasterPrompt ? 'Đã sao chép tất cả!' : 'Copy Toàn Bộ Prompts'}</span>
-                              </button>
+                            {storyboardData && (
                               <button
                                 onClick={handleDownloadStoryboardMd}
-                                className="px-3 py-2 bg-indigo-700 hover:bg-indigo-800 text-white rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1.5"
+                                className="px-3.5 py-2 bg-indigo-700 hover:bg-indigo-800 text-white rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1.5"
                               >
                                 <span>📥</span>
                                 <span>Tải Kịch Bản (.md)</span>
                               </button>
-                            </>
-                          )}
+                            )}
+                          </div>
                         </div>
+
+                        {/* Batch Copy Toolbar */}
+                        {storyboardData && (
+                          <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-purple-200/80 text-xs">
+                            <span className="text-purple-900 font-bold text-[11px] flex items-center gap-1 mr-1">
+                              <span>⚡</span> Sao chép nhanh:
+                            </span>
+
+                            <button
+                              onClick={handleCopyAllVideoPrompts}
+                              className={`px-2.5 py-1.5 rounded-lg font-bold text-[11px] transition-all border shadow-2xs flex items-center gap-1 ${
+                                copiedTarget === 'all_video_prompts'
+                                  ? 'bg-emerald-600 text-white border-emerald-600'
+                                  : 'bg-white hover:bg-purple-50 text-purple-900 border-purple-200'
+                              }`}
+                            >
+                              <span>{copiedTarget === 'all_video_prompts' ? '✓' : '🎬'}</span>
+                              <span>{copiedTarget === 'all_video_prompts' ? 'Đã copy All Video Prompts!' : 'Copy Tất Cả Prompt Video'}</span>
+                            </button>
+
+                            <button
+                              onClick={handleCopyAllImagePrompts}
+                              className={`px-2.5 py-1.5 rounded-lg font-bold text-[11px] transition-all border shadow-2xs flex items-center gap-1 ${
+                                copiedTarget === 'all_img_prompts'
+                                  ? 'bg-emerald-600 text-white border-emerald-600'
+                                  : 'bg-white hover:bg-purple-50 text-purple-900 border-purple-200'
+                              }`}
+                            >
+                              <span>{copiedTarget === 'all_img_prompts' ? '✓' : '🖼️'}</span>
+                              <span>{copiedTarget === 'all_img_prompts' ? 'Đã copy All Image Prompts!' : 'Copy Tất Cả Prompt Ảnh'}</span>
+                            </button>
+
+                            <button
+                              onClick={handleCopyAllVoiceovers}
+                              className={`px-2.5 py-1.5 rounded-lg font-bold text-[11px] transition-all border shadow-2xs flex items-center gap-1 ${
+                                copiedTarget === 'all_voiceovers'
+                                  ? 'bg-emerald-600 text-white border-emerald-600'
+                                  : 'bg-white hover:bg-purple-50 text-purple-900 border-purple-200'
+                              }`}
+                            >
+                              <span>{copiedTarget === 'all_voiceovers' ? '✓' : '🎙️'}</span>
+                              <span>{copiedTarget === 'all_voiceovers' ? 'Đã copy All Lời thoại!' : 'Copy Tất Cả Lời Thoại'}</span>
+                            </button>
+
+                            <button
+                              onClick={handleCopyFullCodeText}
+                              className={`px-2.5 py-1.5 rounded-lg font-bold text-[11px] transition-all border shadow-2xs flex items-center gap-1 ${
+                                copiedTarget === 'all_full_code'
+                                  ? 'bg-emerald-600 text-white border-emerald-600'
+                                  : 'bg-purple-900 hover:bg-purple-950 text-white border-purple-900'
+                              }`}
+                            >
+                              <span>{copiedTarget === 'all_full_code' ? '✓' : '📋'}</span>
+                              <span>{copiedTarget === 'all_full_code' ? 'Đã copy Toàn Bộ Kịch Bản!' : 'Copy Full Code Text'}</span>
+                            </button>
+                          </div>
+                        )}
                       </div>
 
                       {/* Loading State */}
@@ -1457,8 +1579,8 @@ export default function Home() {
                         <div className="h-64 flex flex-col items-center justify-center text-center space-y-4">
                           <div className="animate-spin w-10 h-10 border-4 border-purple-600 border-t-transparent rounded-full" />
                           <div>
-                            <p className="font-bold text-slate-800">Đang kiến tạo Storyboard &amp; Prompts AI Video...</p>
-                            <p className="text-xs text-slate-500 mt-1">Thiết kế 5 phân cảnh điện ảnh 3D, lời bình sư phạm và thông số camera Runway/Kling...</p>
+                            <p className="font-bold text-slate-800">Đang kiến tạo Storyboard &amp; Bộ Prompt AI Video...</p>
+                            <p className="text-xs text-slate-500 mt-1">Đóng gói Prompt Ảnh, Prompt Video Runway/Sora và Lời thoại tiếng Việt chuẩn sư phạm...</p>
                           </div>
                         </div>
                       )}
@@ -1469,7 +1591,7 @@ export default function Home() {
                           <span className="text-4xl">🎬</span>
                           <h4 className="font-bold text-slate-800 text-sm">Chưa có Kịch bản Video cho bài học này</h4>
                           <p className="text-xs text-slate-500 max-w-md mx-auto">
-                            Nhấn nút &quot;Tạo Kịch Bản Video&quot; để AI tự động chuyển hóa KHDH thành kịch bản phân cảnh Storyboard 5 bước cùng bộ Prompt sinh video Runway Gen-3 / Kling 1.5 / Sora chuyên nghiệp.
+                            Nhấn nút &quot;Tạo Kịch Bản Video&quot; để AI tự động chuyển hóa KHDH thành kịch bản phân cảnh Storyboard 5 bước có đủ Prompt Ảnh, Prompt Video và Lời thoại tiếng Việt dưới dạng code text dễ copy.
                           </p>
                           <button
                             onClick={handleGenerateStoryboard}
@@ -1500,89 +1622,137 @@ export default function Home() {
                           </div>
 
                           {/* Scenes List */}
-                          <div className="space-y-3">
+                          <div className="space-y-5">
                             {storyboardData.scenes.map((scene, idx) => {
-                              const isCopied = copiedPromptIndex === idx;
+                              const imgPrompt = scene.imagePrompt || scene.videoPrompt || '';
+                              const vidPrompt = scene.videoPrompt || scene.aiVideoPrompt || '';
+                              const voScript = scene.voiceoverScript || '';
+
                               return (
                                 <div
                                   key={idx}
-                                  className="p-4 bg-white border border-slate-200 rounded-2xl shadow-xs space-y-3 hover:border-purple-300 transition-all"
+                                  className="p-5 bg-white border border-slate-200 rounded-2xl shadow-sm space-y-4 hover:border-purple-300 transition-all"
                                 >
                                   {/* Scene Header */}
-                                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
-                                    <div className="flex items-center gap-2">
-                                      <span className="px-2.5 py-1 bg-purple-700 text-white rounded-lg font-black text-xs">
+                                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                                    <div className="flex items-center gap-2.5">
+                                      <span className="px-2.5 py-1 bg-purple-700 text-white rounded-lg font-black text-xs shadow-2xs">
                                         CẢNH {scene.sceneNumber}
                                       </span>
-                                      <h4 className="font-bold text-slate-800 text-sm">
+                                      <h4 className="font-bold text-slate-900 text-sm">
                                         {scene.title}
                                       </h4>
                                     </div>
-                                    <span className="px-2.5 py-0.5 bg-amber-50 text-amber-800 border border-amber-200 rounded-full text-xs font-bold">
-                                      ⏱️ {scene.duration}
-                                    </span>
+
+                                    <div className="flex items-center gap-2">
+                                      <span className="px-2.5 py-1 bg-amber-50 text-amber-900 border border-amber-200 rounded-full text-xs font-bold">
+                                        ⏱️ {scene.duration}
+                                      </span>
+                                      <button
+                                        onClick={() => handleCopyFullScene(scene, idx)}
+                                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all border flex items-center gap-1 ${
+                                          copiedTarget === `scene_full_${idx}`
+                                            ? 'bg-emerald-600 text-white border-emerald-600'
+                                            : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border-slate-300'
+                                        }`}
+                                      >
+                                        <span>{copiedTarget === `scene_full_${idx}` ? '✓' : '📋'}</span>
+                                        <span>{copiedTarget === `scene_full_${idx}` ? 'Đã copy Cảnh ' + scene.sceneNumber : 'Copy Trọn Cảnh ' + scene.sceneNumber}</span>
+                                      </button>
+                                    </div>
                                   </div>
 
-                                  {/* Scene 3-Column Content */}
-                                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 text-xs">
-                                    {/* Col 1: Visual & Display (4 cols) */}
-                                    <div className="lg:col-span-4 space-y-2 bg-slate-50 p-3 rounded-xl border border-slate-100">
-                                      <div className="font-bold text-slate-700 flex items-center gap-1">
-                                        <span>👁️</span> Mô tả Hình ảnh &amp; Đồ họa:
-                                      </div>
-                                      <p className="text-slate-600 leading-relaxed">
-                                        {scene.visualDescription}
-                                      </p>
+                                  {/* Scene Context Info */}
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs bg-slate-50 p-3 rounded-xl border border-slate-100">
+                                    <div>
+                                      <span className="font-bold text-slate-700 block mb-0.5">👁️ Mô tả thị giác &amp; Góc quay:</span>
+                                      <p className="text-slate-600 leading-relaxed">{scene.visualDescription}</p>
+                                    </div>
+                                    <div className="space-y-1.5">
                                       {scene.onScreenText && (
-                                        <div className="pt-1">
-                                          <span className="font-semibold text-slate-500 block text-[11px]">Chữ/Công thức trên màn hình:</span>
-                                          <div className="font-mono text-blue-800 font-bold bg-blue-50/70 p-1.5 rounded border border-blue-200 text-[11px] mt-0.5">
+                                        <div>
+                                          <span className="font-bold text-slate-700 block mb-0.5">📺 Chữ / Công thức trên màn hình:</span>
+                                          <div className="font-mono text-blue-800 font-bold bg-blue-50/80 p-1.5 rounded border border-blue-200 text-[11px]">
                                             {scene.onScreenText}
                                           </div>
                                         </div>
                                       )}
-                                    </div>
-
-                                    {/* Col 2: Voiceover & Sound (4 cols) */}
-                                    <div className="lg:col-span-4 space-y-2 bg-slate-50 p-3 rounded-xl border border-slate-100">
-                                      <div className="font-bold text-slate-700 flex items-center gap-1">
-                                        <span>🎙️</span> Lời thoại Sư phạm (Voiceover):
-                                      </div>
-                                      <p className="text-slate-800 leading-relaxed italic bg-white p-2.5 rounded-lg border border-slate-200">
-                                        &quot;{scene.voiceoverScript}&quot;
-                                      </p>
                                       {scene.audioPrompt && (
-                                        <div className="text-[11px] text-slate-500 pt-1">
-                                          <span className="font-semibold">🎵 Âm thanh &amp; BGM:</span> {scene.audioPrompt}
+                                        <div className="text-[11px] text-slate-500">
+                                          <span className="font-bold text-slate-700">🎵 Âm thanh:</span> {scene.audioPrompt}
                                         </div>
                                       )}
                                     </div>
+                                  </div>
 
-                                    {/* Col 3: AI Video Prompt (4 cols) */}
-                                    <div className="lg:col-span-4 space-y-2 bg-purple-50/40 p-3 rounded-xl border border-purple-200 flex flex-col justify-between">
-                                      <div>
-                                        <div className="flex items-center justify-between mb-1">
-                                          <span className="font-bold text-purple-900 flex items-center gap-1">
-                                            <span>🤖</span> Runway / Kling / Sora Prompt:
-                                          </span>
-                                        </div>
-                                        <p className="font-mono text-[11px] text-slate-700 bg-white p-2.5 rounded-lg border border-purple-200 leading-relaxed max-h-32 overflow-y-auto">
-                                          {scene.aiVideoPrompt}
-                                        </p>
-                                      </div>
-
-                                      <div className="pt-2">
+                                  {/* 3 Core Code Text Blocks */}
+                                  <div className="space-y-3">
+                                    {/* 1. Lời thoại tiếng Việt */}
+                                    <div className="rounded-xl overflow-hidden border border-amber-200 bg-amber-50/40">
+                                      <div className="px-3 py-2 bg-amber-100/70 border-b border-amber-200 flex items-center justify-between">
+                                        <span className="text-xs font-bold text-amber-950 flex items-center gap-1.5">
+                                          <span>🎙️</span> Lời Thoại Thuyết Minh Tiếng Việt (Sư Phạm / ElevenLabs / Vbee):
+                                        </span>
                                         <button
-                                          onClick={() => handleCopyScenePrompt(scene.aiVideoPrompt, idx)}
-                                          className={`w-full py-1.5 px-3 rounded-lg font-bold text-xs transition-all flex items-center justify-center gap-1.5 ${
-                                            isCopied
-                                              ? 'bg-emerald-600 text-white shadow-xs'
-                                              : 'bg-purple-700 hover:bg-purple-800 text-white shadow-xs'
+                                          onClick={() => handleCopySnippet(voScript, `vo_${idx}`)}
+                                          className={`px-2 py-0.5 rounded text-[11px] font-bold transition-all flex items-center gap-1 ${
+                                            copiedTarget === `vo_${idx}`
+                                              ? 'bg-emerald-600 text-white'
+                                              : 'bg-white hover:bg-amber-100 text-amber-900 border border-amber-300'
                                           }`}
                                         >
-                                          <span>{isCopied ? '✓' : '📋'}</span>
-                                          <span>{isCopied ? 'Đã sao chép prompt!' : 'Copy Prompt 1-Click'}</span>
+                                          <span>{copiedTarget === `vo_${idx}` ? '✓' : '📋'}</span>
+                                          <span>{copiedTarget === `vo_${idx}` ? 'Đã copy!' : 'Copy Lời Thoại'}</span>
                                         </button>
+                                      </div>
+                                      <div className="p-3 font-mono text-xs text-amber-950 whitespace-pre-wrap leading-relaxed bg-white/70">
+                                        &quot;{voScript}&quot;
+                                      </div>
+                                    </div>
+
+                                    {/* 2. Prompt Ảnh Keyframe */}
+                                    <div className="rounded-xl overflow-hidden border border-slate-800 bg-slate-950 text-slate-100">
+                                      <div className="px-3 py-2 bg-slate-900 border-b border-slate-800 flex items-center justify-between">
+                                        <span className="text-xs font-bold text-sky-400 flex items-center gap-1.5">
+                                          <span>🖼️</span> Prompt Ảnh Keyframe (Midjourney v6 / Flux.1 / DALL-E 3):
+                                        </span>
+                                        <button
+                                          onClick={() => handleCopySnippet(imgPrompt, `img_${idx}`)}
+                                          className={`px-2 py-0.5 rounded text-[11px] font-bold transition-all flex items-center gap-1 ${
+                                            copiedTarget === `img_${idx}`
+                                              ? 'bg-emerald-600 text-white'
+                                              : 'bg-slate-800 hover:bg-slate-700 text-sky-300 border border-slate-700'
+                                          }`}
+                                        >
+                                          <span>{copiedTarget === `img_${idx}` ? '✓' : '📋'}</span>
+                                          <span>{copiedTarget === `img_${idx}` ? 'Đã copy!' : 'Copy Prompt Ảnh'}</span>
+                                        </button>
+                                      </div>
+                                      <div className="p-3 font-mono text-xs text-sky-300 whitespace-pre-wrap leading-relaxed overflow-x-auto select-all">
+                                        {imgPrompt}
+                                      </div>
+                                    </div>
+
+                                    {/* 3. Prompt Video Chuyển Động */}
+                                    <div className="rounded-xl overflow-hidden border border-slate-800 bg-slate-950 text-slate-100">
+                                      <div className="px-3 py-2 bg-slate-900 border-b border-slate-800 flex items-center justify-between">
+                                        <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                                          <span>🎬</span> Prompt Video Chuyển Động (Runway Gen-3 Alpha / Kling 1.5 / Sora):
+                                        </span>
+                                        <button
+                                          onClick={() => handleCopySnippet(vidPrompt, `vid_${idx}`)}
+                                          className={`px-2 py-0.5 rounded text-[11px] font-bold transition-all flex items-center gap-1 ${
+                                            copiedTarget === `vid_${idx}`
+                                              ? 'bg-emerald-600 text-white'
+                                              : 'bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-slate-700'
+                                          }`}
+                                        >
+                                          <span>{copiedTarget === `vid_${idx}` ? '✓' : '📋'}</span>
+                                          <span>{copiedTarget === `vid_${idx}` ? 'Đã copy!' : 'Copy Prompt Video'}</span>
+                                        </button>
+                                      </div>
+                                      <div className="p-3 font-mono text-xs text-emerald-300 whitespace-pre-wrap leading-relaxed overflow-x-auto select-all">
+                                        {vidPrompt}
                                       </div>
                                     </div>
                                   </div>
