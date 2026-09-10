@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { ApiKeyService } from '@/services/ai/api-key.service';
 import type { MultiKeyTestResult } from '@/services/ai/ai.types';
 import type { SourceDocument, SourceDocumentType, SourceReadinessReport } from '@/types/source-document';
+import type { VideoStoryboardData } from '@/types/video-storyboard.types';
 
 const COMMANDS = [
   { id: 'KHOI_DONG', label: '🚀 Khởi động', desc: 'Lập chỉ mục nguồn & kiểm tra hệ thống' },
@@ -69,7 +70,7 @@ export default function Home() {
   const [command, setCommand] = useState('SOAN_XUAT');
   const [lessonCode, setLessonCode] = useState('TOAN-8-HKI-SODAISO-C01-STT01');
   const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'draft' | 'preview' | 'worksheet' | 'slide' | 'sources' | 'stats'>('draft');
+  const [activeTab, setActiveTab] = useState<'draft' | 'preview' | 'worksheet' | 'game' | 'storyboard' | 'slide' | 'sources' | 'stats'>('draft');
   const [error, setError] = useState<string | null>(null);
   const [outputData, setOutputData] = useState<OutputData | null>(null);
   const [pipelineStep, setPipelineStep] = useState<string>('');
@@ -80,6 +81,17 @@ export default function Home() {
   const [worksheetMarkdown, setWorksheetMarkdown] = useState<string | null>(null);
   const [generatingWorksheet, setGeneratingWorksheet] = useState(false);
   const [exportingWorksheetWord, setExportingWorksheetWord] = useState(false);
+
+  // Interactive HTML Game State
+  const [gameHtml, setGameHtml] = useState<string | null>(null);
+  const [generatingGame, setGeneratingGame] = useState(false);
+  const [selectedGameTemplate, setSelectedGameTemplate] = useState<'SPACE_QUIZ' | 'LUCKY_WHEEL' | 'MEMORY_MATCH'>('SPACE_QUIZ');
+
+  // Video Storyboard State
+  const [storyboardData, setStoryboardData] = useState<VideoStoryboardData | null>(null);
+  const [generatingStoryboard, setGeneratingStoryboard] = useState(false);
+  const [copiedPromptIndex, setCopiedPromptIndex] = useState<number | null>(null);
+  const [copiedMasterPrompt, setCopiedMasterPrompt] = useState(false);
 
   // Multi-Key State
   const [showSettings, setShowSettings] = useState(false);
@@ -539,6 +551,141 @@ export default function Home() {
     alert('Đã sao chép nội dung Phiếu học tập vào Clipboard!');
   };
 
+  const handleGenerateGame = async (templateOverride?: 'SPACE_QUIZ' | 'LUCKY_WHEEL' | 'MEMORY_MATCH') => {
+    if (!outputData?.khdh_draft) return;
+    const targetTemplate = templateOverride || selectedGameTemplate;
+    setGeneratingGame(true);
+    setError(null);
+    try {
+      const activeKeys = currentParsedKeys.length > 0 ? currentParsedKeys : ApiKeyService.getClientKeys();
+      const res = await fetch('/api/generate-game', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          khdhDraft: outputData.khdh_draft,
+          lessonCode: outputData.lesson_code,
+          templateId: targetTemplate,
+          apiKeys: activeKeys,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || 'Không thể tạo Trò chơi tương tác.');
+      }
+
+      setGameHtml(data.html);
+      setActiveTab('game');
+    } catch (err: unknown) {
+      const msg = (err as Error)?.message || 'Lỗi khi tạo Trò chơi.';
+      setError(msg);
+    } finally {
+      setGeneratingGame(false);
+    }
+  };
+
+  const handleDownloadGameHtml = () => {
+    if (!gameHtml) return;
+    const blob = new Blob([gameHtml], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `GAME_${outputData?.lesson_code || 'TOAN-8'}_${Date.now()}.html`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleGenerateStoryboard = async () => {
+    if (!outputData?.khdh_draft) return;
+    setGeneratingStoryboard(true);
+    setError(null);
+    try {
+      const activeKeys = currentParsedKeys.length > 0 ? currentParsedKeys : ApiKeyService.getClientKeys();
+      const res = await fetch('/api/generate-storyboard', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          khdhDraft: outputData.khdh_draft,
+          lessonCode: outputData.lesson_code,
+          apiKeys: activeKeys,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || 'Không thể tạo Kịch bản Video.');
+      }
+
+      setStoryboardData(data.storyboard);
+      setActiveTab('storyboard');
+    } catch (err: unknown) {
+      const msg = (err as Error)?.message || 'Lỗi khi tạo Kịch bản Video.';
+      setError(msg);
+    } finally {
+      setGeneratingStoryboard(false);
+    }
+  };
+
+  const handleCopyScenePrompt = (promptText: string, sceneIndex: number) => {
+    navigator.clipboard.writeText(promptText);
+    setCopiedPromptIndex(sceneIndex);
+    setTimeout(() => {
+      setCopiedPromptIndex(null);
+    }, 2000);
+  };
+
+  const handleCopyAllPrompts = () => {
+    if (!storyboardData?.scenes) return;
+    const allPrompts = storyboardData.scenes
+      .map(
+        (s) =>
+          `=== ${s.title} (${s.duration}) ===\nPROMPT:\n${s.aiVideoPrompt}\nVOICEOVER:\n${s.voiceoverScript}\n`
+      )
+      .join('\n----------------------------------------\n\n');
+
+    navigator.clipboard.writeText(allPrompts);
+    setCopiedMasterPrompt(true);
+    setTimeout(() => {
+      setCopiedMasterPrompt(false);
+    }, 2500);
+  };
+
+  const handleDownloadStoryboardMd = () => {
+    if (!storyboardData) return;
+    const mdLines = [
+      `# KỊCH BẢN VIDEO & PROMPTS AI: ${storyboardData.lessonTitle}`,
+      `- Mã bài học: ${storyboardData.lessonCode}`,
+      `- Tổng thời lượng: ${storyboardData.totalDuration}`,
+      `- Phong cách video: ${storyboardData.videoStyle}`,
+      `- Đối tượng: ${storyboardData.targetAudience}`,
+      `\n---\n`,
+      ...storyboardData.scenes.map((s) =>
+        [
+          `## ${s.title} (${s.duration})`,
+          `- **Mô tả thị giác:** ${s.visualDescription}`,
+          `- **Chữ hiển thị:** ${s.onScreenText}`,
+          `- **Lời thoại:** ${s.voiceoverScript}`,
+          `- **Âm thanh / BGM:** ${s.audioPrompt}`,
+          `- **AI Video Prompt (Runway/Kling/Sora):**`,
+          `\`\`\`text\n${s.aiVideoPrompt}\n\`\`\``,
+          `\n`,
+        ].join('\n')
+      ),
+    ];
+
+    const blob = new Blob([mdLines.join('\n')], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `STORYBOARD_${outputData?.lesson_code || 'TOAN-8'}_${Date.now()}.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900 p-4 md:p-6 font-sans">
       {/* Hidden File Inputs */}
@@ -984,13 +1131,15 @@ export default function Home() {
                 { id: 'draft', label: '📝 Bản Thảo KHDH' },
                 { id: 'preview', label: '📐 Xem Trước 2 Cột' },
                 { id: 'worksheet', label: '📋 Phiếu Học Tập' },
+                { id: 'game', label: '🎮 Trò Chơi HTML' },
+                { id: 'storyboard', label: '🎬 Kịch Bản Video AI' },
                 { id: 'slide', label: '📊 Slide & Canva' },
                 { id: 'sources', label: '📚 Nguồn Sử Dụng' },
                 { id: 'stats', label: '📈 Thống Kê & Key' },
               ].map((tab) => (
                 <button
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id as 'draft' | 'preview' | 'worksheet' | 'slide' | 'sources' | 'stats')}
+                  onClick={() => setActiveTab(tab.id as 'draft' | 'preview' | 'worksheet' | 'game' | 'storyboard' | 'slide' | 'sources' | 'stats')}
                   className={`flex-1 min-w-[110px] py-2 px-2.5 rounded-lg text-xs font-bold transition-all ${
                     activeTab === tab.id
                       ? 'bg-white text-blue-700 shadow-sm'
@@ -1148,6 +1297,298 @@ export default function Home() {
                           {/* Markdown Body */}
                           <div className="font-mono text-xs whitespace-pre-wrap leading-relaxed text-slate-800 bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
                             {worksheetMarkdown}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {activeTab === 'game' && (
+                    <div className="space-y-4">
+                      {/* Action & Control Bar */}
+                      <div className="p-4 bg-indigo-50/70 border border-indigo-200 rounded-xl flex flex-col sm:flex-row justify-between sm:items-center gap-3">
+                        <div>
+                          <h3 className="text-sm font-bold text-indigo-950 flex items-center gap-2">
+                            <span>🎮</span> TRÒ CHƠI TƯƠNG TÁC (SINGLE-FILE HTML CHẠY OFFLINE)
+                          </h3>
+                          <p className="text-xs text-indigo-800 mt-0.5">
+                            Bóc tách câu hỏi từ KHDH, tích hợp âm thanh Web Audio, KaTeX công thức Toán &amp; pháo hoa chiến thắng
+                          </p>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            onClick={() => handleGenerateGame()}
+                            disabled={generatingGame}
+                            className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1.5"
+                          >
+                            {generatingGame ? (
+                              <>
+                                <span className="animate-spin inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full" />
+                                <span>Đang tạo Game...</span>
+                              </>
+                            ) : (
+                              <>
+                                <span>⚡</span>
+                                <span>{gameHtml ? 'Tạo Lại Game' : 'Tạo Trò Chơi'}</span>
+                              </>
+                            )}
+                          </button>
+
+                          {gameHtml && (
+                            <button
+                              onClick={handleDownloadGameHtml}
+                              className="px-3.5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1.5"
+                            >
+                              <span>📥</span>
+                              <span>Tải File Game (.html)</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Loading State */}
+                      {generatingGame && (
+                        <div className="h-64 flex flex-col items-center justify-center text-center space-y-4">
+                          <div className="animate-spin w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full" />
+                          <div>
+                            <p className="font-bold text-slate-800">Đang phân tích KHDH &amp; biên dịch Trò chơi tương tác...</p>
+                            <p className="text-xs text-slate-500 mt-1">Đóng gói âm thanh hiệu ứng, công thức Toán KaTeX và giao diện chơi...</p>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Empty State */}
+                      {!generatingGame && !gameHtml && (
+                        <div className="p-8 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-300 space-y-3">
+                          <span className="text-4xl">🚀</span>
+                          <h4 className="font-bold text-slate-800 text-sm">Chưa có Trò chơi tương tác cho bài học này</h4>
+                          <p className="text-xs text-slate-500 max-w-md mx-auto">
+                            Nhấn nút &quot;Tạo Trò Chơi&quot; ở trên để AI tự động trích xuất các câu hỏi từ KHDH thành file game HTML5 chuyên nghiệp, chơi được trực tiếp hoặc chiếu trên lớp học.
+                          </p>
+                          <button
+                            onClick={() => handleGenerateGame()}
+                            className="btn-primary text-xs px-4 py-2 inline-flex items-center gap-1.5"
+                          >
+                            <span>🎮</span> Tạo Trò Chơi Ngay
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Live Interactive Iframe Preview */}
+                      {!generatingGame && gameHtml && (
+                        <div className="space-y-2">
+                          <div className="flex justify-between items-center px-1">
+                            <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                              <span>🕹️</span> Khung chơi thử trực tiếp (Interactive Live Preview):
+                            </span>
+                            <span className="text-[11px] text-emerald-700 font-semibold bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                              🟢 Sẵn sàng trình chiếu / Chạy Offline
+                            </span>
+                          </div>
+                          <div className="rounded-2xl overflow-hidden border border-slate-700 bg-slate-950 shadow-xl">
+                            <iframe
+                              srcDoc={gameHtml}
+                              title="Interactive Math Game"
+                              className="w-full h-[560px] border-0"
+                              sandbox="allow-scripts allow-same-origin allow-modals"
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {activeTab === 'storyboard' && (
+                    <div className="space-y-4">
+                      {/* Action & Control Bar */}
+                      <div className="p-4 bg-purple-50/80 border border-purple-200 rounded-xl flex flex-col sm:flex-row justify-between sm:items-center gap-3">
+                        <div>
+                          <h3 className="text-sm font-bold text-purple-950 flex items-center gap-2">
+                            <span>🎬</span> KỊCH BẢN STORYBOARD &amp; PROMPTS AI VIDEO (RUNWAY GEN-3 / KLING / SORA)
+                          </h3>
+                          <p className="text-xs text-purple-800 mt-0.5">
+                            Phân cảnh 5 bước Micro-learning, lời thoại sư phạm &amp; bộ prompt tiếng Anh cinematic 3D chuẩn 1-Click
+                          </p>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            onClick={handleGenerateStoryboard}
+                            disabled={generatingStoryboard}
+                            className="px-3.5 py-2 bg-purple-700 hover:bg-purple-800 text-white rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1.5"
+                          >
+                            {generatingStoryboard ? (
+                              <>
+                                <span className="animate-spin inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full" />
+                                <span>Đang viết kịch bản...</span>
+                              </>
+                            ) : (
+                              <>
+                                <span>⚡</span>
+                                <span>{storyboardData ? 'Tạo Lại Kịch Bản' : 'Tạo Kịch Bản Video'}</span>
+                              </>
+                            )}
+                          </button>
+
+                          {storyboardData && (
+                            <>
+                              <button
+                                onClick={handleCopyAllPrompts}
+                                className="px-3 py-2 bg-white hover:bg-purple-50 text-purple-900 border border-purple-300 rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1.5"
+                              >
+                                <span>{copiedMasterPrompt ? '✓' : '📋'}</span>
+                                <span>{copiedMasterPrompt ? 'Đã sao chép tất cả!' : 'Copy Toàn Bộ Prompts'}</span>
+                              </button>
+                              <button
+                                onClick={handleDownloadStoryboardMd}
+                                className="px-3 py-2 bg-indigo-700 hover:bg-indigo-800 text-white rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1.5"
+                              >
+                                <span>📥</span>
+                                <span>Tải Kịch Bản (.md)</span>
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Loading State */}
+                      {generatingStoryboard && (
+                        <div className="h-64 flex flex-col items-center justify-center text-center space-y-4">
+                          <div className="animate-spin w-10 h-10 border-4 border-purple-600 border-t-transparent rounded-full" />
+                          <div>
+                            <p className="font-bold text-slate-800">Đang kiến tạo Storyboard &amp; Prompts AI Video...</p>
+                            <p className="text-xs text-slate-500 mt-1">Thiết kế 5 phân cảnh điện ảnh 3D, lời bình sư phạm và thông số camera Runway/Kling...</p>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Empty State */}
+                      {!generatingStoryboard && !storyboardData && (
+                        <div className="p-8 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-300 space-y-3">
+                          <span className="text-4xl">🎬</span>
+                          <h4 className="font-bold text-slate-800 text-sm">Chưa có Kịch bản Video cho bài học này</h4>
+                          <p className="text-xs text-slate-500 max-w-md mx-auto">
+                            Nhấn nút &quot;Tạo Kịch Bản Video&quot; để AI tự động chuyển hóa KHDH thành kịch bản phân cảnh Storyboard 5 bước cùng bộ Prompt sinh video Runway Gen-3 / Kling 1.5 / Sora chuyên nghiệp.
+                          </p>
+                          <button
+                            onClick={handleGenerateStoryboard}
+                            className="btn-primary text-xs px-4 py-2 inline-flex items-center gap-1.5"
+                          >
+                            <span>🚀</span> Tạo Kịch Bản Video Ngay
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Storyboard Content Matrix */}
+                      {!generatingStoryboard && storyboardData && (
+                        <div className="space-y-4">
+                          {/* Summary Bar */}
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            <div className="p-3 bg-purple-50/60 border border-purple-100 rounded-xl text-xs">
+                              <span className="text-purple-600 font-semibold block">Thời lượng mục tiêu:</span>
+                              <span className="font-bold text-purple-950 text-sm">{storyboardData.totalDuration}</span>
+                            </div>
+                            <div className="p-3 bg-blue-50/60 border border-blue-100 rounded-xl text-xs">
+                              <span className="text-blue-600 font-semibold block">Phong cách thị giác:</span>
+                              <span className="font-bold text-blue-950 text-xs">{storyboardData.videoStyle}</span>
+                            </div>
+                            <div className="p-3 bg-emerald-50/60 border border-emerald-100 rounded-xl text-xs">
+                              <span className="text-emerald-600 font-semibold block">Đối tượng học sinh:</span>
+                              <span className="font-bold text-emerald-950 text-sm">{storyboardData.targetAudience}</span>
+                            </div>
+                          </div>
+
+                          {/* Scenes List */}
+                          <div className="space-y-3">
+                            {storyboardData.scenes.map((scene, idx) => {
+                              const isCopied = copiedPromptIndex === idx;
+                              return (
+                                <div
+                                  key={idx}
+                                  className="p-4 bg-white border border-slate-200 rounded-2xl shadow-xs space-y-3 hover:border-purple-300 transition-all"
+                                >
+                                  {/* Scene Header */}
+                                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
+                                    <div className="flex items-center gap-2">
+                                      <span className="px-2.5 py-1 bg-purple-700 text-white rounded-lg font-black text-xs">
+                                        CẢNH {scene.sceneNumber}
+                                      </span>
+                                      <h4 className="font-bold text-slate-800 text-sm">
+                                        {scene.title}
+                                      </h4>
+                                    </div>
+                                    <span className="px-2.5 py-0.5 bg-amber-50 text-amber-800 border border-amber-200 rounded-full text-xs font-bold">
+                                      ⏱️ {scene.duration}
+                                    </span>
+                                  </div>
+
+                                  {/* Scene 3-Column Content */}
+                                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 text-xs">
+                                    {/* Col 1: Visual & Display (4 cols) */}
+                                    <div className="lg:col-span-4 space-y-2 bg-slate-50 p-3 rounded-xl border border-slate-100">
+                                      <div className="font-bold text-slate-700 flex items-center gap-1">
+                                        <span>👁️</span> Mô tả Hình ảnh &amp; Đồ họa:
+                                      </div>
+                                      <p className="text-slate-600 leading-relaxed">
+                                        {scene.visualDescription}
+                                      </p>
+                                      {scene.onScreenText && (
+                                        <div className="pt-1">
+                                          <span className="font-semibold text-slate-500 block text-[11px]">Chữ/Công thức trên màn hình:</span>
+                                          <div className="font-mono text-blue-800 font-bold bg-blue-50/70 p-1.5 rounded border border-blue-200 text-[11px] mt-0.5">
+                                            {scene.onScreenText}
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+
+                                    {/* Col 2: Voiceover & Sound (4 cols) */}
+                                    <div className="lg:col-span-4 space-y-2 bg-slate-50 p-3 rounded-xl border border-slate-100">
+                                      <div className="font-bold text-slate-700 flex items-center gap-1">
+                                        <span>🎙️</span> Lời thoại Sư phạm (Voiceover):
+                                      </div>
+                                      <p className="text-slate-800 leading-relaxed italic bg-white p-2.5 rounded-lg border border-slate-200">
+                                        &quot;{scene.voiceoverScript}&quot;
+                                      </p>
+                                      {scene.audioPrompt && (
+                                        <div className="text-[11px] text-slate-500 pt-1">
+                                          <span className="font-semibold">🎵 Âm thanh &amp; BGM:</span> {scene.audioPrompt}
+                                        </div>
+                                      )}
+                                    </div>
+
+                                    {/* Col 3: AI Video Prompt (4 cols) */}
+                                    <div className="lg:col-span-4 space-y-2 bg-purple-50/40 p-3 rounded-xl border border-purple-200 flex flex-col justify-between">
+                                      <div>
+                                        <div className="flex items-center justify-between mb-1">
+                                          <span className="font-bold text-purple-900 flex items-center gap-1">
+                                            <span>🤖</span> Runway / Kling / Sora Prompt:
+                                          </span>
+                                        </div>
+                                        <p className="font-mono text-[11px] text-slate-700 bg-white p-2.5 rounded-lg border border-purple-200 leading-relaxed max-h-32 overflow-y-auto">
+                                          {scene.aiVideoPrompt}
+                                        </p>
+                                      </div>
+
+                                      <div className="pt-2">
+                                        <button
+                                          onClick={() => handleCopyScenePrompt(scene.aiVideoPrompt, idx)}
+                                          className={`w-full py-1.5 px-3 rounded-lg font-bold text-xs transition-all flex items-center justify-center gap-1.5 ${
+                                            isCopied
+                                              ? 'bg-emerald-600 text-white shadow-xs'
+                                              : 'bg-purple-700 hover:bg-purple-800 text-white shadow-xs'
+                                          }`}
+                                        >
+                                          <span>{isCopied ? '✓' : '📋'}</span>
+                                          <span>{isCopied ? 'Đã sao chép prompt!' : 'Copy Prompt 1-Click'}</span>
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
                       )}
