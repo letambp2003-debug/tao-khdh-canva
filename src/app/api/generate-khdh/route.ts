@@ -3,6 +3,7 @@ import { getEnv } from '@/config/env';
 import { GeminiService } from '@/services/ai/gemini.service';
 import { SourceDocumentService } from '@/services/documents/source-document.service';
 import { SourceContextBuilder } from '@/services/documents/source-context-builder';
+import { ContentNormalizer } from '@/services/export/content-normalizer';
 import { checkRateLimit } from '@/lib/rate-limiter';
 import { readFile } from 'fs/promises';
 import { join } from 'path';
@@ -81,6 +82,7 @@ export async function POST(request: NextRequest) {
       '3. Mỗi hoạt động có đủ 4 phần: a) Mục tiêu, b) Nội dung, c) Sản phẩm, d) Tổ chức thực hiện (Bước 1, 2, 3, 4).',
       '4. Công thức toán dùng chuẩn LaTeX $...$ hoặc $$...$$.',
       '5. Hình học chính xác dùng mã TikZ / Overleaf; ảnh minh họa thực tế dùng PROMPT TẠO ẢNH ngay dưới nội dung.',
+      '6. TUYỆT ĐỐI KHÔNG xuất khối JSON AgentMessage, metadata JSON hay code block markdown ở đầu bản thảo. Bắt đầu trực tiếp bằng tiêu đề giáo án `# KẾ HOẠCH BÀI DẠY: ...`.',
       '',
       sourceContextText,
       '',
@@ -93,7 +95,7 @@ export async function POST(request: NextRequest) {
       `MÃ BÀI HỌC: ${lessonCode || 'TỰ ĐỘNG'}`,
       `MÃ CÔNG VIỆC: ${activeJobId}`,
       '',
-      'Hãy thực thi lệnh và tạo bản Kế hoạch bài dạy hoàn chỉnh, chi tiết, đúng định dạng V10.1, tuân thủ nghiêm ngặt các căn cứ tài liệu nguồn và thứ tự ưu tiên đã được cung cấp.',
+      'Hãy thực thi lệnh và tạo bản Kế hoạch bài dạy hoàn chỉnh, chi tiết, đúng định dạng V10.1, tuân thủ nghiêm ngặt các căn cứ tài liệu nguồn và thứ tự ưu tiên đã được cung cấp. Bắt đầu trực tiếp bằng # KẾ HOẠCH BÀI DẠY.',
     ].join('\n');
 
     const result = await GeminiService.generateContent({
@@ -103,12 +105,14 @@ export async function POST(request: NextRequest) {
       model: 'pro',
     });
 
+    const cleanDraft = ContentNormalizer.cleanMetadata(result.text);
+
     return NextResponse.json({
       status: 'OK',
       job_id: activeJobId,
       command,
       lesson_code: lessonCode || 'AUTO',
-      khdh_draft: result.text,
+      khdh_draft: cleanDraft,
       token_usage: result.usage,
       model: result.model,
       duration_ms: result.durationMs,
