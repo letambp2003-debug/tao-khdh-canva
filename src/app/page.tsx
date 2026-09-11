@@ -59,6 +59,15 @@ const DOC_TYPE_LABELS: Record<SourceDocumentType, { label: string; icon: string;
   }
 };
 
+interface UserSession {
+  email: string;
+  name: string;
+  picture?: string;
+  role: string;
+  hasConfiguredKeys: boolean;
+  keyCount: number;
+}
+
 interface OutputData {
   status: string;
   job_id: string;
@@ -79,6 +88,14 @@ interface OutputData {
 }
 
 export default function Home() {
+  // Authentication & User Vault State
+  const [currentUser, setCurrentUser] = useState<UserSession | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [showOnboardingModal, setShowOnboardingModal] = useState(false);
+  const [loginEmailInput, setLoginEmailInput] = useState('');
+  const [loginNameInput, setLoginNameInput] = useState('');
+  const [loggingIn, setLoggingIn] = useState(false);
+
   const [command, setCommand] = useState('SOAN_V11_KHONG_TACH_TIET');
   const [khdhFormatMode, setKhdhFormatMode] = useState<'SPLIT_PERIODS' | 'CONTINUOUS_4SECTION'>('CONTINUOUS_4SECTION');
   const [lessonCode, setLessonCode] = useState('TOAN-8-HKI-SODAISO-C01-STT01');
@@ -136,15 +153,118 @@ export default function Home() {
   const pendingUploadTypeRef = useRef<SourceDocumentType | undefined>(undefined);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Load API keys & documents on mount
+  // Check session and load documents on mount
   useEffect(() => {
-    const keys = ApiKeyService.getClientKeys();
-    if (keys.length > 0) {
-      setRawKeysInput(keys.join('\n'));
-      setConfiguredKeyCount(keys.length);
-    }
+    checkUserSession();
     fetchDocuments();
   }, []);
+
+  const checkUserSession = async () => {
+    setAuthLoading(true);
+    try {
+      const res = await fetch('/api/auth/me');
+      const data = await res.json();
+      if (data.authenticated && data.user) {
+        setCurrentUser(data.user);
+        setConfiguredKeyCount(data.user.keyCount || 0);
+        if (!data.user.hasConfiguredKeys) {
+          setShowOnboardingModal(true);
+        }
+      } else {
+        setCurrentUser(null);
+      }
+    } catch {
+      setCurrentUser(null);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleGoogleLogin = async (profileData?: { email: string; name?: string; picture?: string; credential?: string }) => {
+    setLoggingIn(true);
+    setError(null);
+    try {
+      const body = profileData || {
+        email: loginEmailInput.trim() || 'letambp2003@gmail.com',
+        name: loginNameInput.trim() || 'Thầy Lê Tâm',
+        picture: 'https://api.dicebear.com/7.x/avataaars/svg?seed=' + encodeURIComponent(loginEmailInput || 'LeTam'),
+      };
+
+      const res = await fetch('/api/auth/google', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || 'Đăng nhập Google thất bại.');
+      }
+
+      setCurrentUser(data.user);
+      setConfiguredKeyCount(data.user.keyCount || 0);
+
+      if (data.isFirstTime || !data.user.hasConfiguredKeys) {
+        setShowOnboardingModal(true);
+      }
+    } catch (err: unknown) {
+      setError((err as Error)?.message || 'Lỗi kết nối khi đăng nhập.');
+    } finally {
+      setLoggingIn(false);
+    }
+  };
+
+  const handleSaveOnboardingKeys = async () => {
+    if (currentParsedKeys.length === 0) {
+      setError('Vui lòng nhập ít nhất 1 Google AI API Key để kích hoạt tài khoản.');
+      return;
+    }
+
+    setTestingKey(true);
+    try {
+      const res = await fetch('/api/auth/keys', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKeys: currentParsedKeys }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || 'Không thể lưu API Key.');
+      }
+
+      ApiKeyService.saveClientKeys(currentParsedKeys, true);
+      setConfiguredKeyCount(currentParsedKeys.length);
+
+      if (currentUser) {
+        setCurrentUser({
+          ...currentUser,
+          hasConfiguredKeys: true,
+          keyCount: currentParsedKeys.length,
+        });
+      }
+
+      setShowOnboardingModal(false);
+      setShowSettings(false);
+      alert('Kích hoạt thành công! API Key đã được mã hóa an toàn và lưu giữ vĩnh viễn theo tài khoản Google của Thầy/Cô.');
+    } catch (err: unknown) {
+      setError((err as Error)?.message || 'Lỗi khi lưu API Key.');
+    } finally {
+      setTestingKey(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+      setCurrentUser(null);
+      ApiKeyService.clearClientKeys();
+      setConfiguredKeyCount(0);
+      setOutputData(null);
+    } catch {
+      setCurrentUser(null);
+    }
+  };
 
   const currentParsedKeys = ApiKeyService.parseKeys(rawKeysInput);
 
@@ -861,6 +981,150 @@ export default function Home() {
     URL.revokeObjectURL(url);
   };
 
+  // 1. Loading State during session check
+  if (authLoading) {
+    return (
+      <main className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 text-white flex items-center justify-center p-4 font-sans">
+        <div className="text-center space-y-4 max-w-sm">
+          <div className="animate-spin w-12 h-12 border-4 border-blue-400 border-t-transparent rounded-full mx-auto shadow-lg" />
+          <div className="space-y-1">
+            <h2 className="text-lg font-bold tracking-tight">KHDH AUTO V11</h2>
+            <p className="text-xs text-slate-400">Đang kiểm tra bảo mật &amp; phiên đăng nhập Google...</p>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  // 2. Google Login Screen if not authenticated
+  if (!currentUser) {
+    return (
+      <main className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 text-slate-100 flex items-center justify-center p-4 font-sans relative overflow-hidden">
+        {/* Background ambient glow */}
+        <div className="absolute -top-40 -left-40 w-96 h-96 bg-blue-600/20 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute -bottom-40 -right-40 w-96 h-96 bg-purple-600/20 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="max-w-md w-full bg-slate-800/90 backdrop-blur-md rounded-3xl border border-slate-700/80 p-6 sm:p-8 shadow-2xl space-y-6 relative z-10">
+          {/* Brand Header */}
+          <div className="text-center space-y-2">
+            <div className="inline-flex items-center gap-2 px-3 py-1 bg-blue-500/10 border border-blue-400/30 rounded-full text-blue-300 text-xs font-bold uppercase tracking-wider mb-1">
+              <span>🔐</span> BẢO MẬT &amp; XÁC THỰC GOOGLE
+            </div>
+            <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
+              KHDH AUTO V11
+            </h1>
+            <p className="text-xs text-slate-400 leading-relaxed max-w-xs mx-auto">
+              Hệ thống Soạn Kế hoạch bài dạy, Phiếu học tập, Trò chơi tương tác &amp; Kịch bản Video AI chuẩn Bộ Giáo dục.
+            </p>
+          </div>
+
+          {/* Login Action Area */}
+          <div className="space-y-4 pt-2">
+            {error && (
+              <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 text-xs flex items-center gap-2">
+                <span>⚠️</span>
+                <span>{error}</span>
+              </div>
+            )}
+
+            {/* Google One-Click Button */}
+            <button
+              onClick={() => handleGoogleLogin()}
+              disabled={loggingIn}
+              className="w-full py-3.5 px-4 bg-white hover:bg-slate-100 text-slate-900 font-bold rounded-2xl text-sm transition-all shadow-lg hover:shadow-xl flex items-center justify-center gap-3 border border-slate-200"
+            >
+              {loggingIn ? (
+                <>
+                  <span className="animate-spin w-4 h-4 border-2 border-slate-700 border-t-transparent rounded-full" />
+                  <span>Đang kết nối Google...</span>
+                </>
+              ) : (
+                <>
+                  <svg className="w-5 h-5" viewBox="0 0 24 24">
+                    <path
+                      fill="#4285F4"
+                      d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                    />
+                    <path
+                      fill="#34A853"
+                      d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                    />
+                    <path
+                      fill="#FBBC05"
+                      d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+                    />
+                    <path
+                      fill="#EA4335"
+                      d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+                    />
+                  </svg>
+                  <span>Tiếp tục với Google</span>
+                </>
+              )}
+            </button>
+
+            <div className="flex items-center my-3">
+              <div className="flex-1 border-t border-slate-700" />
+              <span className="px-3 text-[11px] text-slate-400 uppercase tracking-wider font-semibold">
+                Hoặc nhập Email Google
+              </span>
+              <div className="flex-1 border-t border-slate-700" />
+            </div>
+
+            {/* Custom Google Email Login */}
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Địa chỉ Email Google (Gmail / Edu):
+                </label>
+                <input
+                  type="email"
+                  value={loginEmailInput}
+                  onChange={(e) => setLoginEmailInput(e.target.value)}
+                  placeholder="letambp2003@gmail.com"
+                  className="w-full px-3.5 py-2.5 bg-slate-900/80 border border-slate-700 rounded-xl text-xs text-white focus:outline-hidden focus:ring-2 focus:ring-blue-500 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Họ và tên giáo viên:
+                </label>
+                <input
+                  type="text"
+                  value={loginNameInput}
+                  onChange={(e) => setLoginNameInput(e.target.value)}
+                  placeholder="Thầy Lê Tâm"
+                  className="w-full px-3.5 py-2.5 bg-slate-900/80 border border-slate-700 rounded-xl text-xs text-white focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <button
+                type="button"
+                onClick={() => handleGoogleLogin()}
+                disabled={loggingIn}
+                className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs transition-all shadow-xs flex items-center justify-center gap-2"
+              >
+                <span>🚀</span>
+                <span>Đăng Nhập Ngay</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Privacy & Key Vault Notice */}
+          <div className="p-3.5 bg-blue-950/50 border border-blue-800/40 rounded-2xl text-[11px] text-blue-200 space-y-1">
+            <div className="font-bold flex items-center gap-1.5 text-blue-300">
+              <span>🛡️</span> Cơ chế lưu giữ API Key an toàn:
+            </div>
+            <p className="text-slate-300 leading-relaxed">
+              API Key của Thầy/Cô chỉ cần nhập <strong>1 lần duy nhất khi đăng ký lần đầu</strong>, được mã hóa chuẩn <strong>AES-256</strong> và tự động lưu giữ theo tài khoản Google. Các lần mở link sau không bao giờ phải nhập lại.
+            </p>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900 p-4 md:p-6 font-sans">
       {/* Hidden File Inputs */}
@@ -884,20 +1148,46 @@ export default function Home() {
       <header className="mb-6 bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <div className="flex items-center gap-3">
-            <span className="bg-blue-700 text-white text-xs font-bold px-2.5 py-1 rounded-full uppercase tracking-wider">
-              V10.1 FINAL
+            <span className="bg-gradient-to-r from-blue-700 to-indigo-700 text-white text-xs font-bold px-2.5 py-1 rounded-full uppercase tracking-wider shadow-2xs">
+              V11 FINAL &amp; V10.1
             </span>
             <h1 className="text-2xl font-black text-blue-800 tracking-tight">KHDH AUTO</h1>
           </div>
           <p className="text-sm font-medium text-slate-600 mt-1">
-            Trường THCS Quang Trung | Tổ Toán Tin | GV: Lê Tâm
+            Trường THCS Quang Trung | Tổ Toán Tin | GV: {currentUser?.name || 'Lê Tâm'}
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        {/* User Profile & Key Status */}
+        <div className="flex flex-wrap items-center gap-3">
+          {currentUser && (
+            <div className="flex items-center gap-3 bg-slate-50 p-1.5 pr-3 rounded-2xl border border-slate-200 shadow-2xs">
+              {currentUser.picture ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={currentUser.picture}
+                  alt={currentUser.name}
+                  className="w-9 h-9 rounded-xl object-cover border border-slate-300 shadow-xs"
+                />
+              ) : (
+                <div className="w-9 h-9 rounded-xl bg-blue-700 text-white font-bold flex items-center justify-center text-sm shadow-xs">
+                  {currentUser.name.charAt(0).toUpperCase()}
+                </div>
+              )}
+              <div className="text-left">
+                <div className="font-bold text-xs text-slate-900 leading-tight">
+                  {currentUser.name}
+                </div>
+                <div className="text-[11px] text-slate-500 font-medium">
+                  {currentUser.email}
+                </div>
+              </div>
+            </div>
+          )}
+
           <button
             onClick={() => setShowSettings(true)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold border transition-all ${
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold border transition-all shadow-xs ${
               configuredKeyCount > 1
                 ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
                 : configuredKeyCount === 1
@@ -907,14 +1197,23 @@ export default function Home() {
           >
             <span>
               {configuredKeyCount > 1
-                ? `🟢 ${configuredKeyCount} Keys (Luân phiên & Dự phòng)`
+                ? `🟢 ${configuredKeyCount} Keys (Đã lưu)`
                 : configuredKeyCount === 1
-                ? '🟢 1 Key Đang Hoạt Động'
-                : '🟡 Cấu Hình API Key'}
+                ? '🟢 1 Key (Đã lưu)'
+                : '🟡 Cấu hình Key'}
             </span>
-            <span className="text-xs bg-white px-2 py-0.5 rounded-lg border border-slate-200 shadow-xs">
-              Quản lý
+            <span className="text-[10px] bg-white px-1.5 py-0.5 rounded-md border border-slate-200">
+              Đổi key
             </span>
+          </button>
+
+          <button
+            onClick={handleLogout}
+            title="Đăng xuất khỏi hệ thống"
+            className="px-3 py-2 text-xs font-bold text-slate-600 hover:text-rose-700 hover:bg-rose-50 rounded-xl border border-slate-200 transition-all flex items-center gap-1"
+          >
+            <span>🚪</span>
+            <span>Đăng xuất</span>
           </button>
         </div>
       </header>
@@ -2352,6 +2651,108 @@ export default function Home() {
           </div>
         </div>
       </div>
+
+      {/* First-Time Activation / Onboarding Modal */}
+      {showOnboardingModal && currentUser && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white max-w-lg w-full rounded-3xl p-6 shadow-2xl border border-slate-200 space-y-5 animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center gap-3 border-b border-slate-100 pb-4">
+              <div className="w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-800 flex items-center justify-center text-2xl shadow-xs">
+                🎉
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-slate-900">
+                  Chào mừng Thầy/Cô {currentUser.name}!
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Tài khoản: <strong className="text-slate-700">{currentUser.email}</strong>
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-3 text-xs text-slate-600 leading-relaxed">
+              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl text-emerald-950 space-y-1">
+                <p className="font-bold flex items-center gap-1.5">
+                  <span>🔑</span> Kích hoạt quyền sử dụng lần đầu:
+                </p>
+                <p>
+                  Để hệ thống AI soạn giáo án, phiếu học tập và kịch bản video hoạt động, Thầy/Cô vui lòng dán <strong>Google AI API Key</strong> vào ô bên dưới.
+                </p>
+                <p className="text-[11px] text-emerald-800 font-semibold pt-1">
+                  ✓ Khóa này sẽ được mã hóa an toàn và gắn liền với tài khoản Google của Thầy/Cô vĩnh viễn (không cần nhập lại lần sau).
+                </p>
+              </div>
+
+              <div>
+                <div className="flex justify-between items-center mb-1.5">
+                  <label className="font-bold text-slate-700">
+                    Nhập Google AI API Key của bạn:
+                  </label>
+                  <a
+                    href="https://aistudio.google.com/app/apikey"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[11px] font-bold text-blue-700 hover:text-blue-900 flex items-center gap-0.5 underline"
+                  >
+                    <span>🔗</span> Lấy Key miễn phí tại Google AI Studio
+                  </a>
+                </div>
+                <textarea
+                  rows={4}
+                  value={rawKeysInput}
+                  onChange={(e) => setRawKeysInput(e.target.value)}
+                  placeholder="AIzaSyA123456789... (Có thể dán nhiều key, mỗi key 1 dòng)"
+                  className="input-field font-mono text-xs leading-relaxed"
+                />
+              </div>
+
+              {/* Test key feedback */}
+              {multiKeyResult && (
+                <div
+                  className={`p-3 rounded-xl text-xs font-semibold ${
+                    multiKeyResult.success
+                      ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                      : 'bg-rose-50 text-rose-800 border border-rose-200'
+                  }`}
+                >
+                  {multiKeyResult.message}
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-center justify-between border-t border-slate-100 pt-4 gap-2">
+              <button
+                type="button"
+                onClick={handleTestKeys}
+                disabled={testingKey || currentParsedKeys.length === 0}
+                className="w-full sm:w-auto px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all border border-slate-300 flex items-center justify-center gap-1.5"
+              >
+                {testingKey ? (
+                  <>
+                    <span className="animate-spin inline-block w-3 h-3 border-2 border-slate-700 border-t-transparent rounded-full" />
+                    <span>Đang test...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>🔍</span>
+                    <span>Kiểm tra Key</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleSaveOnboardingKeys}
+                disabled={currentParsedKeys.length === 0}
+                className="w-full sm:w-auto px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center justify-center gap-2"
+              >
+                <span>💾</span>
+                <span>Lưu &amp; Kích Hoạt Ngay</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Multi-Key Settings Modal */}
       {showSettings && (
