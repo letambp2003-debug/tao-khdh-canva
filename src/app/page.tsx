@@ -17,8 +17,9 @@ import {
 import type { LessonRequirementAnalysis } from '@/types/lesson-analysis.types';
 
 const COMMANDS = [
-  { id: 'KHOI_DONG', label: '🚀 Khởi động', desc: 'Lập chỉ mục nguồn & kiểm tra hệ thống' },
-  { id: 'SOAN_XUAT', label: '✍️ Soạn xuất KHDH', desc: 'Soạn hoặc nâng cấp giáo án tự động' },
+  { id: 'SOAN_V11_KHONG_TACH_TIET', label: '📄 Soạn KHDH V11 (Không tách tiết)', desc: 'Tiến trình 4 phần A-B-C-D liền mạch (V11 FINAL)' },
+  { id: 'SOAN_XUAT', label: '✂️ Soạn KHDH (Tách tiết)', desc: 'Phân chia theo từng Tiết PPCT (V10.1)' },
+  { id: 'KHOI_DONG', label: '🚀 Khởi động & Kiểm tra', desc: 'Lập chỉ mục nguồn & kiểm tra hệ thống' },
   { id: 'RA_SOAT_NHANH', label: '🔍 Rà soát nhanh (Delta QA)', desc: 'Kiểm tra lỗi và độ khớp nguồn' },
   { id: 'KIEM_TRA_TOAN', label: '📐 Kiểm tra Toán & OMML', desc: 'Chuẩn hóa công thức & Word Equation' },
   { id: 'TAO_SLIDE_NGHIEN_CUU', label: '📊 Tạo Slide nghiên cứu', desc: '15-20 slide chuẩn sư phạm mỗi tiết' },
@@ -62,6 +63,7 @@ interface OutputData {
   status: string;
   job_id: string;
   command: string;
+  format_mode?: 'SPLIT_PERIODS' | 'CONTINUOUS_4SECTION';
   lesson_code: string;
   khdh_draft: string;
   token_usage?: {
@@ -77,7 +79,8 @@ interface OutputData {
 }
 
 export default function Home() {
-  const [command, setCommand] = useState('SOAN_XUAT');
+  const [command, setCommand] = useState('SOAN_V11_KHONG_TACH_TIET');
+  const [khdhFormatMode, setKhdhFormatMode] = useState<'SPLIT_PERIODS' | 'CONTINUOUS_4SECTION'>('CONTINUOUS_4SECTION');
   const [lessonCode, setLessonCode] = useState('TOAN-8-HKI-SODAISO-C01-STT01');
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'draft' | 'preview' | 'worksheet' | 'game' | 'storyboard' | 'slide' | 'sources' | 'stats'>('draft');
@@ -381,12 +384,18 @@ export default function Home() {
     }
   };
 
-  const handleLockConfig = (executeImmediately: boolean = false) => {
+  const handleLockConfig = (
+    executeImmediately: boolean = false,
+    customMode?: 'SPLIT_PERIODS' | 'CONTINUOUS_4SECTION',
+    customCmd?: string
+  ) => {
     if (!lessonAnalysis) return;
     setIsConfigLocked(true);
     setShowAnalysisModal(false);
     if (executeImmediately) {
-      handleSubmit(undefined, lessonAnalysis);
+      const activeMode = customMode || khdhFormatMode;
+      const activeCmd = customCmd || (activeMode === 'CONTINUOUS_4SECTION' ? 'SOAN_V11_KHONG_TACH_TIET' : 'SOAN_XUAT');
+      handleSubmit(undefined, lessonAnalysis, activeCmd, activeMode);
     }
   };
 
@@ -394,18 +403,30 @@ export default function Home() {
     setIsConfigLocked(false);
   };
 
-  const handleSubmit = async (e?: React.FormEvent, configOverride?: LessonRequirementAnalysis) => {
+  const handleSubmit = async (
+    e?: React.FormEvent,
+    configOverride?: LessonRequirementAnalysis,
+    overrideCommand?: string,
+    overrideMode?: 'SPLIT_PERIODS' | 'CONTINUOUS_4SECTION'
+  ) => {
     if (e) e.preventDefault();
     if (loading) return;
 
-    if (!command.trim()) {
+    const activeCmd = (overrideCommand || command).trim();
+    const activeMode = overrideMode || khdhFormatMode;
+
+    if (!activeCmd) {
       setError('Vui lòng chọn hoặc nhập Lệnh (Command).');
       return;
     }
 
     setLoading(true);
     setError(null);
-    setPipelineStep('Đang chuẩn bị căn cứ tài liệu nguồn & kết nối Google AI...');
+    setPipelineStep(
+      activeMode === 'CONTINUOUS_4SECTION'
+        ? 'Đang chuẩn bị căn cứ tài liệu nguồn & cấu trúc V11 Không Tách Tiết (4 Phần A-B-C-D)...'
+        : 'Đang chuẩn bị căn cứ tài liệu nguồn & cấu trúc Tách Tiết theo PPCT...'
+    );
     setOutputData(null);
 
     const controller = new AbortController();
@@ -418,7 +439,11 @@ export default function Home() {
       // Lấy danh sách ID các tài liệu đang Active & Ready
       const activeDocIds = documents.filter((d) => d.isActive && d.status === 'READY').map((d) => d.id);
 
-      setPipelineStep('Đang điều phối Agent & thực thi (Bám sát căn cứ tài liệu nguồn & Xoay vòng Key)...');
+      setPipelineStep(
+        activeMode === 'CONTINUOUS_4SECTION'
+          ? 'Đang soạn KHDH V11 (4 phần A-B-C-D liền mạch, gạch đầu dòng chuẩn, bảng đánh giá)...'
+          : 'Đang soạn KHDH Tách tiết (Phân theo từng Tiết PPCT, chuẩn CV 5512)...'
+      );
 
       const targetConfig = configOverride || (isConfigLocked ? lessonAnalysis : undefined);
 
@@ -426,7 +451,8 @@ export default function Home() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          command: command.trim(),
+          command: activeCmd,
+          formatMode: activeMode,
           lessonCode: targetConfig?.lessonTitle || lessonCode.trim(),
           jobId,
           apiKeys: activeKeys,
@@ -1149,14 +1175,84 @@ export default function Home() {
         {/* Left Control Panel (4 cols) */}
         <div className="lg:col-span-4 space-y-5">
           <div className="card space-y-4">
-            <h2 className="text-base font-bold text-slate-800 flex items-center gap-2">
-              <span>⚡</span> Bảng Điều Khiển Lệnh
+            <h2 className="text-base font-bold text-slate-800 flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <span>⚡</span> Bảng Điều Khiển Lệnh
+              </span>
+              <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-800 border border-blue-200">
+                {khdhFormatMode === 'CONTINUOUS_4SECTION' ? '📄 V11 Không Tách Tiết' : '✂️ Tách Tiết PPCT'}
+              </span>
             </h2>
+
+            {/* Chế độ định dạng KHDH (Mode Switcher) */}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                Định dạng giáo án mục tiêu:
+              </label>
+              <div className="bg-slate-100 p-1 rounded-xl flex gap-1 border border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setKhdhFormatMode('CONTINUOUS_4SECTION');
+                    setCommand('SOAN_V11_KHONG_TACH_TIET');
+                  }}
+                  className={`flex-1 py-2 px-2.5 rounded-lg text-xs font-bold transition-all flex flex-col items-center justify-center gap-0.5 ${
+                    khdhFormatMode === 'CONTINUOUS_4SECTION'
+                      ? 'bg-emerald-700 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                  }`}
+                >
+                  <span className="flex items-center gap-1">
+                    <span>📄</span> (2) Không Tách Tiết
+                  </span>
+                  <span className={`text-[10px] font-normal ${
+                    khdhFormatMode === 'CONTINUOUS_4SECTION' ? 'text-emerald-100' : 'text-slate-500'
+                  }`}>
+                    V11 — 4 Phần A-B-C-D
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setKhdhFormatMode('SPLIT_PERIODS');
+                    setCommand('SOAN_XUAT');
+                  }}
+                  className={`flex-1 py-2 px-2.5 rounded-lg text-xs font-bold transition-all flex flex-col items-center justify-center gap-0.5 ${
+                    khdhFormatMode === 'SPLIT_PERIODS'
+                      ? 'bg-blue-700 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                  }`}
+                >
+                  <span className="flex items-center gap-1">
+                    <span>✂️</span> (1) Tách Tiết
+                  </span>
+                  <span className={`text-[10px] font-normal ${
+                    khdhFormatMode === 'SPLIT_PERIODS' ? 'text-blue-100' : 'text-slate-500'
+                  }`}>
+                    V10.1 — Tiết [PPCT]
+                  </span>
+                </button>
+              </div>
+
+              {/* Format Description Tooltip */}
+              <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-[11px] text-slate-600 leading-relaxed">
+                {khdhFormatMode === 'CONTINUOUS_4SECTION' ? (
+                  <p>
+                    <strong className="text-emerald-800">📄 Chuẩn V11 (4 phần A-B-C-D):</strong> Giữ một tiến trình thống nhất gồm 4 hoạt động lớn, không ngắt quãng tiêu đề Tiết 1, Tiết 2; gạch đầu dòng literal <code>-</code>, đầy đủ Hướng dẫn về nhà &amp; Kế hoạch đánh giá 5 cột.
+                  </p>
+                ) : (
+                  <p>
+                    <strong className="text-blue-800">✂️ Chuẩn V10.1 (Tách tiết):</strong> Phân chia cấu trúc bài học thành các mốc Tiết 1 [PPCT 1], Tiết 2 [PPCT 2]... phù hợp với đơn vị yêu cầu giáo án theo từng tiết rời.
+                  </p>
+                )}
+              </div>
+            </div>
 
             {/* Quick Command Chips */}
             <div>
               <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
-                Lệnh chuẩn V10.1:
+                Các lệnh thực thi nhanh:
               </label>
               <div className="grid grid-cols-2 gap-2">
                 {COMMANDS.map((cmd) => (
@@ -1286,33 +1382,75 @@ export default function Home() {
               )}
             </div>
 
-            {/* Action Buttons */}
-            <div className="pt-2 flex gap-3">
-              <button
-                onClick={() => handleSubmit()}
-                disabled={loading}
-                className="btn-primary flex-1 py-3 text-sm flex items-center justify-center gap-2"
-              >
-                {loading ? (
-                  <>
-                    <span className="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
-                    <span>{pipelineStep || 'Đang xử lý...'}</span>
-                  </>
-                ) : (
-                  <>
-                    <span>🚀</span>
-                    <span>Thực Thi Ngay</span>
-                  </>
-                )}
-              </button>
+            {/* 2 Nút Lệnh Tạo KHDH Chuyên Biệt */}
+            <div className="pt-2 space-y-2.5">
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                Thực thi tạo KHDH theo yêu cầu:
+              </label>
 
-              {loading && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {/* Nút 1: Tách Tiết */}
                 <button
-                  onClick={handleAbort}
-                  className="bg-rose-600 hover:bg-rose-700 text-white font-semibold px-4 py-3 rounded-lg text-sm transition-all"
+                  type="button"
+                  onClick={() => {
+                    setKhdhFormatMode('SPLIT_PERIODS');
+                    setCommand('SOAN_XUAT');
+                    handleSubmit(undefined, undefined, 'SOAN_XUAT', 'SPLIT_PERIODS');
+                  }}
+                  disabled={loading}
+                  className={`p-3.5 rounded-xl text-xs font-bold transition-all shadow-sm flex flex-col items-center justify-center text-center gap-1 border ${
+                    khdhFormatMode === 'SPLIT_PERIODS'
+                      ? 'bg-gradient-to-br from-blue-700 to-indigo-800 text-white border-blue-800 ring-2 ring-blue-400'
+                      : 'bg-white hover:bg-blue-50 text-blue-900 border-blue-300'
+                  }`}
                 >
-                  Hủy
+                  <div className="flex items-center gap-1.5 text-sm font-black">
+                    <span>✂️</span> (1) Soạn Tách Tiết
+                  </div>
+                  <div className={`text-[10px] ${khdhFormatMode === 'SPLIT_PERIODS' ? 'text-blue-100' : 'text-slate-500'}`}>
+                    Theo từng Tiết [PPCT] (V10.1)
+                  </div>
                 </button>
+
+                {/* Nút 2: Không Tách Tiết V11 */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setKhdhFormatMode('CONTINUOUS_4SECTION');
+                    setCommand('SOAN_V11_KHONG_TACH_TIET');
+                    handleSubmit(undefined, undefined, 'SOAN_V11_KHONG_TACH_TIET', 'CONTINUOUS_4SECTION');
+                  }}
+                  disabled={loading}
+                  className={`p-3.5 rounded-xl text-xs font-bold transition-all shadow-sm flex flex-col items-center justify-center text-center gap-1 border ${
+                    khdhFormatMode === 'CONTINUOUS_4SECTION'
+                      ? 'bg-gradient-to-br from-emerald-700 to-teal-800 text-white border-emerald-800 ring-2 ring-emerald-400'
+                      : 'bg-white hover:bg-emerald-50 text-emerald-900 border-emerald-300'
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5 text-sm font-black">
+                    <span>📄</span> (2) Không Tách Tiết
+                  </div>
+                  <div className={`text-[10px] ${khdhFormatMode === 'CONTINUOUS_4SECTION' ? 'text-emerald-100' : 'text-slate-500'}`}>
+                    4 Phần A-B-C-D (V11 FINAL)
+                  </div>
+                </button>
+              </div>
+
+              {/* Progress & Cancel Toolbar when loading */}
+              {loading && (
+                <div className="flex items-center justify-between p-3 bg-blue-50/90 border border-blue-200 rounded-xl text-xs text-blue-900 shadow-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="animate-spin inline-block w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full" />
+                    <span className="font-semibold">{pipelineStep || 'Đang xử lý...'}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleAbort}
+                    className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-bold text-xs transition-all shadow-2xs"
+                  >
+                    Hủy
+                  </button>
+                </div>
               )}
             </div>
           </div>
