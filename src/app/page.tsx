@@ -4,7 +4,16 @@ import React, { useState, useRef, useEffect } from 'react';
 import { ApiKeyService } from '@/services/ai/api-key.service';
 import type { MultiKeyTestResult } from '@/services/ai/ai.types';
 import type { SourceDocument, SourceDocumentType, SourceReadinessReport } from '@/types/source-document';
-import type { VideoStoryboardData } from '@/types/video-storyboard.types';
+import type {
+  VideoStoryboardData,
+  VideoStyleId,
+  VideoGenreId,
+} from '@/types/video-storyboard.types';
+import {
+  VIDEO_STYLES,
+  VIDEO_GENRES,
+  SCENE_COUNT_OPTIONS,
+} from '@/types/video-storyboard.types';
 import type { LessonRequirementAnalysis } from '@/types/lesson-analysis.types';
 
 const COMMANDS = [
@@ -88,10 +97,13 @@ export default function Home() {
   const [generatingGame, setGeneratingGame] = useState(false);
   const [selectedGameTemplate, setSelectedGameTemplate] = useState<'SPACE_QUIZ' | 'LUCKY_WHEEL' | 'MEMORY_MATCH'>('SPACE_QUIZ');
 
-  // Video Storyboard State
+  // Video Storyboard State (Google Flow 8s Config)
   const [storyboardData, setStoryboardData] = useState<VideoStoryboardData | null>(null);
   const [generatingStoryboard, setGeneratingStoryboard] = useState(false);
   const [copiedTarget, setCopiedTarget] = useState<string | null>(null);
+  const [selectedVideoStyle, setSelectedVideoStyle] = useState<VideoStyleId>('PIXAR_3D');
+  const [selectedVideoGenre, setSelectedVideoGenre] = useState<VideoGenreId>('CONCEPT_EXPLORATION');
+  const [selectedNumScenes8s, setSelectedNumScenes8s] = useState<number>(5);
 
   // Lesson Requirement Analysis & Locked Configuration State
   const [lessonAnalysis, setLessonAnalysis] = useState<LessonRequirementAnalysis | null>(null);
@@ -671,6 +683,9 @@ export default function Home() {
           khdhDraft: outputData.khdh_draft,
           lessonCode: outputData.lesson_code,
           apiKeys: activeKeys,
+          videoStyle: selectedVideoStyle,
+          videoGenre: selectedVideoGenre,
+          numScenes8s: selectedNumScenes8s,
         }),
       });
 
@@ -1613,15 +1628,20 @@ export default function Home() {
 
                   {activeTab === 'storyboard' && (
                     <div className="space-y-4">
-                      {/* Action & Control Bar */}
-                      <div className="p-4 bg-purple-50/80 border border-purple-200 rounded-xl flex flex-col gap-3">
-                        <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3">
+                      {/* Google Flow & Video AI Master Configuration Bar */}
+                      <div className="p-4 bg-gradient-to-r from-purple-50 via-indigo-50 to-blue-50 border border-purple-200 rounded-2xl shadow-xs space-y-4">
+                        <div className="flex flex-col md:flex-row justify-between md:items-center gap-3">
                           <div>
-                            <h3 className="text-sm font-bold text-purple-950 flex items-center gap-2">
-                              <span>🎬</span> KỊCH BẢN VIDEO &amp; BỘ PROMPT AI (ẢNH, VIDEO, LỜI THOẠI TIẾNG VIỆT)
-                            </h3>
-                            <p className="text-xs text-purple-800 mt-0.5">
-                              Mỗi phân cảnh tích hợp đủ 3 thành phần: Prompt Ảnh (Midjourney/Flux), Prompt Video (Runway/Kling/Sora), Lời thoại tiếng Việt chuẩn sư phạm
+                            <div className="flex items-center gap-2">
+                              <span className="px-2.5 py-0.5 bg-purple-700 text-white font-black text-[10px] uppercase tracking-wider rounded-md">
+                                GOOGLE FLOW &amp; VIDEO AI READY
+                              </span>
+                              <h3 className="text-sm font-black text-purple-950 flex items-center gap-1.5">
+                                <span>🎬</span> KỊCH BẢN VIDEO GIÁO DỤC 8S (GOOGLE FLOW / VEO / SORA)
+                              </h3>
+                            </div>
+                            <p className="text-xs text-purple-800 mt-1">
+                              Tạo bộ phân cảnh chuẩn <strong>8 giây/clip</strong> cho Google Flow. Prompt B-Roll cam kết <strong>KHÔNG TEXT, KHÔNG UI, KHÔNG WATERMARK</strong>; lời thoại và công thức được tách riêng cho khâu chèn hậu kỳ.
                             </p>
                           </div>
 
@@ -1629,17 +1649,17 @@ export default function Home() {
                             <button
                               onClick={handleGenerateStoryboard}
                               disabled={generatingStoryboard}
-                              className="px-3.5 py-2 bg-purple-700 hover:bg-purple-800 text-white rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1.5"
+                              className="px-4 py-2 bg-purple-700 hover:bg-purple-800 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-2"
                             >
                               {generatingStoryboard ? (
                                 <>
-                                  <span className="animate-spin inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full" />
-                                  <span>Đang viết kịch bản...</span>
+                                  <span className="animate-spin inline-block w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full" />
+                                  <span>Đang xuất kịch bản 8s...</span>
                                 </>
                               ) : (
                                 <>
-                                  <span>⚡</span>
-                                  <span>{storyboardData ? 'Tạo Lại Kịch Bản' : 'Tạo Kịch Bản Video'}</span>
+                                  <span>🚀</span>
+                                  <span>{storyboardData ? 'Tạo Lại Kịch Bản 8s' : 'Xuất Kịch Bản Google Flow'}</span>
                                 </>
                               )}
                             </button>
@@ -1647,13 +1667,100 @@ export default function Home() {
                             {storyboardData && (
                               <button
                                 onClick={handleDownloadStoryboardMd}
-                                className="px-3.5 py-2 bg-indigo-700 hover:bg-indigo-800 text-white rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1.5"
+                                className="px-3.5 py-2 bg-indigo-700 hover:bg-indigo-800 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5"
                               >
                                 <span>📥</span>
                                 <span>Tải Kịch Bản (.md)</span>
                               </button>
                             )}
                           </div>
+                        </div>
+
+                        {/* 3 Interactive Buttons / Selectors for Google Flow */}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2 border-t border-purple-200/80 text-xs">
+                          {/* (1) Phong cách (Visual Style) */}
+                          <div className="bg-white/90 p-3 rounded-xl border border-purple-200 shadow-2xs space-y-1.5">
+                            <label className="block text-[11px] font-bold text-purple-950 uppercase tracking-wider flex items-center gap-1">
+                              <span>🎨</span> (1) Phong cách Thị giác:
+                            </label>
+                            <select
+                              value={selectedVideoStyle}
+                              onChange={(e) => setSelectedVideoStyle(e.target.value as VideoStyleId)}
+                              disabled={generatingStoryboard}
+                              className="w-full bg-purple-50/50 border border-purple-300 text-purple-950 text-xs font-bold rounded-lg px-2.5 py-1.5 focus:ring-2 focus:ring-purple-500 focus:outline-hidden"
+                            >
+                              {VIDEO_STYLES.map((st) => (
+                                <option key={st.id} value={st.id}>
+                                  {st.icon} {st.label}
+                                </option>
+                              ))}
+                            </select>
+                            <p className="text-[11px] text-slate-500 leading-tight">
+                              {VIDEO_STYLES.find((s) => s.id === selectedVideoStyle)?.desc}
+                            </p>
+                          </div>
+
+                          {/* (2) Số cảnh 8 giây (Number of 8s Scenes) */}
+                          <div className="bg-white/90 p-3 rounded-xl border border-purple-200 shadow-2xs space-y-1.5">
+                            <label className="block text-[11px] font-bold text-purple-950 uppercase tracking-wider flex items-center justify-between">
+                              <span className="flex items-center gap-1">
+                                <span>⏱️</span> (2) Số cảnh 8 giây:
+                              </span>
+                              <span className="text-[11px] font-black text-purple-700 bg-purple-100 px-1.5 py-0.2 rounded">
+                                Tổng: {selectedNumScenes8s * 8}s
+                              </span>
+                            </label>
+                            <div className="flex flex-wrap gap-1.5 pt-0.5">
+                              {SCENE_COUNT_OPTIONS.map((count) => (
+                                <button
+                                  key={count}
+                                  type="button"
+                                  onClick={() => setSelectedNumScenes8s(count)}
+                                  disabled={generatingStoryboard}
+                                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all border ${
+                                    selectedNumScenes8s === count
+                                      ? 'bg-purple-700 text-white border-purple-700 shadow-2xs'
+                                      : 'bg-white hover:bg-purple-50 text-slate-700 border-slate-200'
+                                  }`}
+                                >
+                                  {count} cảnh ({count * 8}s)
+                                </button>
+                              ))}
+                            </div>
+                            <p className="text-[10px] text-slate-500 leading-tight">
+                              Mỗi clip đúng 8s theo chuẩn tạo video Google Flow &amp; Veo.
+                            </p>
+                          </div>
+
+                          {/* (3) Các thể loại video giáo dục (Educational Video Genres) */}
+                          <div className="bg-white/90 p-3 rounded-xl border border-purple-200 shadow-2xs space-y-1.5">
+                            <label className="block text-[11px] font-bold text-purple-950 uppercase tracking-wider flex items-center gap-1">
+                              <span>📚</span> (3) Thể loại Video Giáo dục:
+                            </label>
+                            <select
+                              value={selectedVideoGenre}
+                              onChange={(e) => setSelectedVideoGenre(e.target.value as VideoGenreId)}
+                              disabled={generatingStoryboard}
+                              className="w-full bg-purple-50/50 border border-purple-300 text-purple-950 text-xs font-bold rounded-lg px-2.5 py-1.5 focus:ring-2 focus:ring-purple-500 focus:outline-hidden"
+                            >
+                              {VIDEO_GENRES.map((g) => (
+                                <option key={g.id} value={g.id}>
+                                  {g.icon} {g.label}
+                                </option>
+                              ))}
+                            </select>
+                            <p className="text-[11px] text-slate-500 leading-tight">
+                              {VIDEO_GENRES.find((g) => g.id === selectedVideoGenre)?.desc}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Standard Compliance Banner */}
+                        <div className="flex items-center gap-2 px-3 py-2 bg-purple-100/70 border border-purple-200 rounded-xl text-[11px] text-purple-900 font-medium">
+                          <span className="text-sm">🛡️</span>
+                          <span>
+                            <strong>Quy chuẩn Google Flow:</strong> Mọi cảnh video &amp; ảnh sinh ra đều có cờ <code>--no text, words, ui, buttons, watermark</code>. Video thuần hiệu ứng thị giác b-roll để bạn ghép voiceover và overlay text trong CapCut/Canva.
+                          </span>
                         </div>
 
                         {/* Batch Copy Toolbar */}
@@ -1746,18 +1853,22 @@ export default function Home() {
                       {!generatingStoryboard && storyboardData && (
                         <div className="space-y-4">
                           {/* Summary Bar */}
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                            <div className="p-3 bg-purple-50/60 border border-purple-100 rounded-xl text-xs">
-                              <span className="text-purple-600 font-semibold block">Thời lượng mục tiêu:</span>
-                              <span className="font-bold text-purple-950 text-sm">{storyboardData.totalDuration}</span>
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                            <div className="p-3 bg-purple-50/70 border border-purple-200 rounded-xl text-xs">
+                              <span className="text-purple-700 font-semibold block">⏱️ Thời lượng 8s/clip:</span>
+                              <span className="font-bold text-purple-950 text-xs sm:text-sm">{storyboardData.totalDuration}</span>
                             </div>
-                            <div className="p-3 bg-blue-50/60 border border-blue-100 rounded-xl text-xs">
-                              <span className="text-blue-600 font-semibold block">Phong cách thị giác:</span>
+                            <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-xl text-xs">
+                              <span className="text-blue-700 font-semibold block">🎨 Phong cách:</span>
                               <span className="font-bold text-blue-950 text-xs">{storyboardData.videoStyle}</span>
                             </div>
-                            <div className="p-3 bg-emerald-50/60 border border-emerald-100 rounded-xl text-xs">
-                              <span className="text-emerald-600 font-semibold block">Đối tượng học sinh:</span>
-                              <span className="font-bold text-emerald-950 text-sm">{storyboardData.targetAudience}</span>
+                            <div className="p-3 bg-indigo-50/70 border border-indigo-200 rounded-xl text-xs">
+                              <span className="text-indigo-700 font-semibold block">📚 Thể loại:</span>
+                              <span className="font-bold text-indigo-950 text-xs">{storyboardData.videoGenre || 'Khám phá kiến thức'}</span>
+                            </div>
+                            <div className="p-3 bg-emerald-50/70 border border-emerald-200 rounded-xl text-xs">
+                              <span className="text-emerald-700 font-semibold block">🎯 Quy chuẩn Prompt:</span>
+                              <span className="font-bold text-emerald-950 text-xs">Zero-Text / Clean B-Roll</span>
                             </div>
                           </div>
 
@@ -1785,8 +1896,8 @@ export default function Home() {
                                     </div>
 
                                     <div className="flex items-center gap-2">
-                                      <span className="px-2.5 py-1 bg-amber-50 text-amber-900 border border-amber-200 rounded-full text-xs font-bold">
-                                        ⏱️ {scene.duration}
+                                      <span className="px-2.5 py-1 bg-gradient-to-r from-purple-100 to-indigo-100 text-purple-900 border border-purple-200 rounded-full text-xs font-bold flex items-center gap-1">
+                                        <span>⏱️</span> {scene.duration || '8s'} (Google Flow Ready)
                                       </span>
                                       <button
                                         onClick={() => handleCopyFullScene(scene, idx)}
