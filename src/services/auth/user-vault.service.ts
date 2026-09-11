@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import { SignJWT, jwtVerify } from 'jose';
 import { getEnv } from '@/config/env';
 
@@ -17,11 +18,19 @@ export interface UserProfile {
 }
 
 export class UserVaultService {
-  private static readonly DATA_DIR = path.join(process.cwd(), 'data', 'users');
+  // In-memory runtime cache for serverless functions
+  private static memoryStore = new Map<string, UserProfile>();
 
-  private static ensureDir() {
-    if (!fs.existsSync(this.DATA_DIR)) {
-      fs.mkdirSync(this.DATA_DIR, { recursive: true });
+  private static getStorageDir(): string {
+    // Prefer OS temp dir which is always writable in serverless environments (e.g. /tmp)
+    try {
+      const tmpDir = path.join(os.tmpdir(), 'khdh-users');
+      if (!fs.existsSync(tmpDir)) {
+        fs.mkdirSync(tmpDir, { recursive: true });
+      }
+      return tmpDir;
+    } catch {
+      return '';
     }
   }
 
@@ -57,26 +66,44 @@ export class UserVaultService {
   }
 
   private static getUserFilePath(email: string): string {
-    this.ensureDir();
+    const dir = this.getStorageDir();
+    if (!dir) return '';
     const safeEmail = email.toLowerCase().trim().replace(/[^a-z0-9@._-]/g, '_');
-    return path.join(this.DATA_DIR, `${safeEmail}.json`);
+    return path.join(dir, `${safeEmail}.json`);
   }
 
   public static getUserByEmail(email: string): UserProfile | null {
-    try {
-      const filePath = this.getUserFilePath(email);
-      if (!fs.existsSync(filePath)) return null;
-      const raw = fs.readFileSync(filePath, 'utf8');
-      return JSON.parse(raw);
-    } catch {
-      return null;
+    const normalized = email.toLowerCase().trim();
+    if (this.memoryStore.has(normalized)) {
+      return this.memoryStore.get(normalized)!;
     }
+
+    try {
+      const filePath = this.getUserFilePath(normalized);
+      if (filePath && fs.existsSync(filePath)) {
+        const raw = fs.readFileSync(filePath, 'utf8');
+        const user = JSON.parse(raw);
+        this.memoryStore.set(normalized, user);
+        return user;
+      }
+    } catch {
+      // Fallback silently to memory
+    }
+    return null;
   }
 
   public static saveUser(user: UserProfile): void {
-    this.ensureDir();
-    const filePath = this.getUserFilePath(user.email);
-    fs.writeFileSync(filePath, JSON.stringify(user, null, 2), 'utf8');
+    const normalized = user.email.toLowerCase().trim();
+    this.memoryStore.set(normalized, user);
+
+    try {
+      const filePath = this.getUserFilePath(normalized);
+      if (filePath) {
+        fs.writeFileSync(filePath, JSON.stringify(user, null, 2), 'utf8');
+      }
+    } catch {
+      // Silent in read-only environments; memoryStore + JWT token handles persistence perfectly
+    }
   }
 
   public static findOrCreateGoogleUser(profile: {
@@ -85,12 +112,13 @@ export class UserVaultService {
     name: string;
     picture?: string;
   }): { user: UserProfile; isFirstTime: boolean } {
-    const existing = this.getUserByEmail(profile.email);
+    const normalizedEmail = profile.email.toLowerCase().trim();
+    const existing = this.getUserByEmail(normalizedEmail);
     const now = new Date().toISOString();
 
     if (existing) {
       existing.lastLoginAt = now;
-      if (profile.name) existing.name = profile.name;
+      if (profile.name && profile.name.trim()) existing.name = profile.name.trim();
       if (profile.picture) existing.picture = profile.picture;
       if (profile.googleId) existing.googleId = profile.googleId;
       this.saveUser(existing);
@@ -103,8 +131,8 @@ export class UserVaultService {
 
     const newUser: UserProfile = {
       googleId: profile.googleId,
-      email: profile.email.toLowerCase().trim(),
-      name: profile.name || profile.email.split('@')[0],
+      email: normalizedEmail,
+      name: (profile.name && profile.name.trim()) ? profile.name.trim() : normalizedEmail.split('@')[0],
       picture: profile.picture || '',
       role: 'TEACHER',
       encryptedKeys: '',
@@ -118,8 +146,18 @@ export class UserVaultService {
   }
 
   public static saveUserKeys(email: string, keys: string[]): boolean {
-    const user = this.getUserByEmail(email);
-    if (!user) return false;
+    const normalized = email.toLowerCase().trim();
+    let user = this.getUserByEmail(normalized);
+    if (!user) {
+      user = {
+        googleId: `user_${Date.now()}`,
+        email: normalized,
+        name: normalized.split('@')[0],
+        role: 'TEACHER',
+        createdAt: new Date().toISOString(),
+        lastLoginAt: new Date().toISOString(),
+      };
+    }
 
     const cleanKeys = Array.from(
       new Set(
@@ -141,11 +179,18 @@ export class UserVaultService {
     return true;
   }
 
-  public static getUserDecryptedKeys(email: string): string[] {
-    const user = this.getUserByEmail(email);
-    if (!user || !user.encryptedKeys) return [];
+  public static getUserDecryptedKeys(emailOrUser: string | UserProfile): string[] {
+    let encryptedKeys = '';
+    if (typeof emailOrUser === 'string') {
+      const user = this.getUserByEmail(emailOrUser);
+      encryptedKeys = user?.encryptedKeys || '';
+    } else {
+      encryptedKeys = emailOrUser.encryptedKeys || '';
+    }
 
-    const decrypted = this.decrypt(user.encryptedKeys);
+    if (!encryptedKeys) return [];
+
+    const decrypted = this.decrypt(encryptedKeys);
     if (!decrypted) return [];
 
     try {
@@ -156,6 +201,9 @@ export class UserVaultService {
     }
   }
 
+  /**
+   * Tạo JWT Token tự chứa (Self-contained JWT Vault) mang theo toàn bộ encryptedKeys an toàn
+   */
   public static async createSessionToken(user: UserProfile): Promise<string> {
     const env = getEnv();
     const secret = new TextEncoder().encode(env.AUTH_SECRET);
@@ -165,6 +213,8 @@ export class UserVaultService {
       picture: user.picture,
       googleId: user.googleId,
       role: user.role,
+      ek: user.encryptedKeys || '',
+      kc: user.keyCount || 0,
     })
       .setProtectedHeader({ alg: 'HS256' })
       .setSubject(user.email)
@@ -180,7 +230,33 @@ export class UserVaultService {
       const { payload } = await jwtVerify(token, secret);
       const email = payload.email as string;
       if (!email) return null;
-      return this.getUserByEmail(email);
+
+      // Extract user from token payload directly
+      const tokenUser: UserProfile = {
+        email,
+        name: (payload.name as string) || email.split('@')[0],
+        picture: (payload.picture as string) || '',
+        googleId: (payload.googleId as string) || '',
+        role: ((payload.role as string) as 'TEACHER' | 'ADMIN') || 'TEACHER',
+        encryptedKeys: (payload.ek as string) || '',
+        keyCount: typeof payload.kc === 'number' ? payload.kc : 0,
+        createdAt: new Date().toISOString(),
+        lastLoginAt: new Date().toISOString(),
+      };
+
+      // Check if local memory/file has a newer version
+      const existing = this.getUserByEmail(email);
+      if (existing) {
+        // Merge in case keys were updated in session
+        if (tokenUser.encryptedKeys && !existing.encryptedKeys) {
+          existing.encryptedKeys = tokenUser.encryptedKeys;
+          existing.keyCount = tokenUser.keyCount;
+        }
+        return existing;
+      }
+
+      this.memoryStore.set(email.toLowerCase().trim(), tokenUser);
+      return tokenUser;
     } catch {
       return null;
     }

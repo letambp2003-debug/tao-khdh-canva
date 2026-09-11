@@ -184,11 +184,27 @@ export default function Home() {
     setLoggingIn(true);
     setError(null);
     try {
-      const body = profileData || {
-        email: loginEmailInput.trim() || 'letambp2003@gmail.com',
-        name: loginNameInput.trim() || 'Thầy Lê Tâm',
-        picture: 'https://api.dicebear.com/7.x/avataaars/svg?seed=' + encodeURIComponent(loginEmailInput || 'LeTam'),
-      };
+      let body: { email: string; name: string; picture?: string; credential?: string };
+
+      if (profileData) {
+        body = {
+          email: profileData.email.trim().toLowerCase(),
+          name: profileData.name?.trim() || profileData.email.split('@')[0],
+          picture: profileData.picture || '',
+          credential: profileData.credential,
+        };
+      } else {
+        const email = loginEmailInput.trim().toLowerCase();
+        if (!email || !email.includes('@')) {
+          throw new Error('Vui lòng nhập địa chỉ Email Google của bạn (ví dụ: gv.toantin@gmail.com).');
+        }
+        const name = loginNameInput.trim() || email.split('@')[0];
+        body = {
+          email,
+          name,
+          picture: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}`,
+        };
+      }
 
       const res = await fetch('/api/auth/google', {
         method: 'POST',
@@ -1081,20 +1097,20 @@ export default function Home() {
                   type="email"
                   value={loginEmailInput}
                   onChange={(e) => setLoginEmailInput(e.target.value)}
-                  placeholder="letambp2003@gmail.com"
+                  placeholder="Nhập email của Thầy/Cô (ví dụ: gv.toan@gmail.com)"
                   className="w-full px-3.5 py-2.5 bg-slate-900/80 border border-slate-700 rounded-xl text-xs text-white focus:outline-hidden focus:ring-2 focus:ring-blue-500 font-mono"
                 />
               </div>
 
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Họ và tên giáo viên:
+                  Họ và tên hiển thị giáo viên:
                 </label>
                 <input
                   type="text"
                   value={loginNameInput}
                   onChange={(e) => setLoginNameInput(e.target.value)}
-                  placeholder="Thầy Lê Tâm"
+                  placeholder="Nhập họ và tên Thầy/Cô (ví dụ: Cô Nguyễn Thị Lan)"
                   className="w-full px-3.5 py-2.5 bg-slate-900/80 border border-slate-700 rounded-xl text-xs text-white focus:outline-hidden focus:ring-2 focus:ring-blue-500"
                 />
               </div>
