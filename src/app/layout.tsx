@@ -11,7 +11,7 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: 'KHDH AUTO V10.1 FINAL - Trường THCS Quang Trung',
+  title: 'KHDH AUTO V11 FINAL - Trường THCS Quang Trung',
   description: 'Hệ thống tự động hóa Kế hoạch dạy học - Tổ Toán Tin',
 };
 
@@ -22,6 +22,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="vi">
+      <head>
+        <script src="https://accounts.google.com/gsi/client" async defer></script>
+      </head>
       <body className={inter.className}>{children}</body>
     </html>
   );
