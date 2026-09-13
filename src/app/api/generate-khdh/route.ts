@@ -98,14 +98,19 @@ export async function POST(request: NextRequest) {
     let skillContent = '';
     if (isContinuous4Section) {
       try {
-        const v11FormPath = join(process.cwd(), '03_FORM_KHDH_V11_4PHAN_KHONG_TACHTIET.MD');
+        const v11FormPath = join(process.cwd(), '03_FORM_KHDH_V11_2_4PHAN_KHONG_TACHTIET.MD');
         skillContent = await readFile(v11FormPath, 'utf-8');
       } catch {
         try {
-          const docsV11Path = join(process.cwd(), 'docs', '03_FORM_KHDH_V11_4PHAN_KHONG_TACHTIET.MD');
+          const docsV11Path = join(process.cwd(), 'docs', '03_FORM_KHDH_V11_2_4PHAN_KHONG_TACHTIET.MD');
           skillContent = await readFile(docsV11Path, 'utf-8');
         } catch {
-          skillContent = 'Soạn KHDH V11 FINAL 4 phần A-B-C-D không tách tiết, bảng 2 cột CV 5512.';
+          try {
+            const legacyV11Path = join(process.cwd(), '03_FORM_KHDH_V11_4PHAN_KHONG_TACHTIET.MD');
+            skillContent = await readFile(legacyV11Path, 'utf-8');
+          } catch {
+            skillContent = 'Soạn KHDH V11-2 FINAL 4 phần A-B-C-D không tách tiết, bảng 2 cột CV 5512.';
+          }
         }
       }
     } else {
@@ -125,32 +130,33 @@ export async function POST(request: NextRequest) {
     // Xây dựng System Prompt cho từng chế độ
     const systemPrompt = isContinuous4Section
       ? [
-          'Bạn là KhdhBuilderAgent V11 FINAL — Chế độ SOẠN KHDH 4 PHẦN LIỀN MẠCH, KHÔNG TÁCH TIẾT (Theo Form 03_FORM_KHDH_V11_4PHAN_KHONG_TACHTIET.MD).',
+          'Bạn là KhdhBuilderAgent V11-2 FINAL — Chế độ SOẠN KHDH 4 PHẦN LIỀN MẠCH, KHÔNG TÁCH TIẾT (Theo Form 03_FORM_KHDH_V11_2_4PHAN_KHONG_TACHTIET.MD).',
           `Trường: ${env.SCHOOL_NAME}`,
           `Tổ chuyên môn: ${env.DEPARTMENT}`,
           `Giáo viên thực hiện: ${env.TEACHER_NAME}`,
           '',
-          '## HỢP ĐỒNG VÀ QUY TẮC BẮT BUỘC CHO CHẾ ĐỘ V11 KHÔNG TÁCH TIẾT:',
+          '## HỢP ĐỒNG VÀ QUY TẮC BẮT BUỘC CHO CHẾ ĐỘ V11-2 KHÔNG TÁCH TIẾT:',
           '1. Toàn bộ tiến trình dạy học tổ chức thống nhất thành đúng 4 phần lớn:',
           '   A. HOẠT ĐỘNG KHỞI ĐỘNG',
           '   B. HOẠT ĐỘNG HÌNH THÀNH KIẾN THỨC (Các Hoạt động 1, 2, ... nối tiếp nhau)',
           '   C. HOẠT ĐỘNG LUYỆN TẬP',
           '   D. HOẠT ĐỘNG VẬN DỤNG',
           '2. TUYỆT ĐỐI KHÔNG chia thành các tiêu đề TIẾT 1, TIẾT 2 trong bản KHDH xuất cuối. Tổng thời lượng = Số tiết × 45 phút và phân bổ liền mạch cho 4 phần A-B-C-D.',
-          '3. Quy ước gạch đầu dòng: Tất cả các ý liệt kê trong mục I (Kiến thức, Năng lực, Phẩm chất), II (Thiết bị), IV (Hướng dẫn về nhà) dùng dấu gạch ngang `-` hoặc `\\-` ở đầu dòng. KHÔNG dùng bullet chấm tròn `•`.',
-          '4. Mục I.1 KIẾN THỨC chỉ liệt kê tên danh mục ngắn gọn (2-12 từ), KHÔNG giải thích, KHÔNG công thức, KHÔNG chép YCCĐ.',
-          '5. Tiến trình dạy học CHỈ DÙNG ĐÚNG 2 CỘT: HOẠT ĐỘNG CỦA GV VÀ HS | SẢN PHẨM DỰ KIẾN.',
-          '6. Mỗi hoạt động có đủ 4 phần: a) Mục tiêu, b) Nội dung, c) Sản phẩm, d) Tổ chức thực hiện (Bước 1, 2, 3, 4).',
-          '7. Hình học chính xác dùng mã TikZ / Overleaf ngay dưới nội dung cần vẽ; Ảnh minh họa thực tế dùng PROMPT TẠO ẢNH ngay dưới nội dung.',
-          '8. Có mục IV. HƯỚNG DẪN VỀ NHÀ và mục V. KẾ HOẠCH ĐÁNH GIÁ NỘI DUNG CỦA BÀI/CHỦ ĐỀ (Bảng 5 cột: Mục đích đánh giá | Hình thức | Phương pháp | Công cụ | Ghi chú).',
-          '9. Công thức toán dùng chuẩn LaTeX $...$ hoặc $$...$$.',
-          '10. TUYỆT ĐỐI KHÔNG xuất khối JSON AgentMessage, metadata JSON hay code block markdown ở đầu bản thảo. Bắt đầu trực tiếp bằng tiêu đề giáo án hoặc phần đầu KHDH.',
+          '3. Quy tắc I.1 KIẾN THỨC: Viết theo cấu trúc "Danh từ/cụm danh từ + từ khóa của bài học". Chỉ nêu tên nội dung kiến thức cốt lõi. KHÔNG dùng động từ mô tả hành động HS, KHÔNG chép YCCĐ, KHÔNG giải thích/định nghĩa/công thức dài.',
+          '4. Quy tắc I.2 NĂNG LỰC: TUYỆT ĐỐI KHÔNG chia thành các tiểu mục "Năng lực chung", "Năng lực đặc thù". Viết trực tiếp bằng HÀNH ĐỘNG QUAN SÁT ĐƯỢC của học sinh (thực hiện, phân tích, lựa chọn, giải quyết, trình bày, trao đổi, sử dụng công cụ, vận dụng...).',
+          '5. Quy tắc I.3 PHẨM CHẤT: Gắn trực tiếp với hành vi cụ thể quan sát được (ví dụ: \\- **Chăm chỉ:** [Hành vi cụ thể]).',
+          '6. Tiến trình dạy học CHỈ DÙNG ĐÚNG 2 CỘT: HOẠT ĐỘNG CỦA GV VÀ HS | SẢN PHẨM DỰ KIẾN (Không thêm cột NLS/AI).',
+          '7. Mỗi hoạt động có đủ 4 phần: a) Mục tiêu, b) Nội dung, c) Sản phẩm, d) Tổ chức thực hiện (Bước 1, 2, 3, 4).',
+          '8. Hình học chính xác dùng mã TikZ / Overleaf ngay dưới nội dung cần vẽ; Ảnh minh họa thực tế dùng PROMPT TẠO ẢNH ngay dưới nội dung.',
+          '9. KHDH cuối kết thúc sau mục IV. HƯỚNG DẪN VỀ NHÀ (KHÔNG xuất mục V. KẾ HOẠCH ĐÁNH GIÁ).',
+          '10. Công thức toán dùng chuẩn LaTeX $...$ hoặc $$...$$.',
+          '11. TUYỆT ĐỐI KHÔNG xuất khối JSON AgentMessage, metadata JSON hay code block markdown ở đầu bản thảo. Bắt đầu trực tiếp bằng tiêu đề giáo án hoặc phần đầu KHDH.',
           '',
           lockedConfigSection,
           '',
           sourceContextText,
           '',
-          '## HƯỚNG DẪN CẤU TRÚC V11 CHUẨN:',
+          '## HƯỚNG DẪN CẤU TRÚC FORM V11-2 CHUẨN:',
           skillContent,
         ].join('\n')
       : [

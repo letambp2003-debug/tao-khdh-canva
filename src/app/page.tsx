@@ -616,7 +616,7 @@ export default function Home() {
     setError(null);
     setPipelineStep(
       activeMode === 'CONTINUOUS_4SECTION'
-        ? 'Đang chuẩn bị căn cứ tài liệu nguồn & cấu trúc V11 Không Tách Tiết (4 Phần A-B-C-D)...'
+        ? 'Đang chuẩn bị căn cứ tài liệu nguồn & cấu trúc V11-2 Không Tách Tiết (4 Phần A-B-C-D)...'
         : 'Đang chuẩn bị căn cứ tài liệu nguồn & cấu trúc Tách Tiết theo PPCT...'
     );
     setOutputData(null);
@@ -1594,7 +1594,7 @@ export default function Home() {
                   <span className={`text-[10px] font-normal ${
                     khdhFormatMode === 'CONTINUOUS_4SECTION' ? 'text-emerald-100' : 'text-slate-500'
                   }`}>
-                    V11 — 4 Phần A-B-C-D
+                    V11-2 — 4 Phần A-B-C-D
                   </span>
                 </button>
 
@@ -1625,7 +1625,7 @@ export default function Home() {
               <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-[11px] text-slate-600 leading-relaxed">
                 {khdhFormatMode === 'CONTINUOUS_4SECTION' ? (
                   <p>
-                    <strong className="text-emerald-800">📄 Chuẩn V11 (4 phần A-B-C-D):</strong> Giữ một tiến trình thống nhất gồm 4 hoạt động lớn, không ngắt quãng tiêu đề Tiết 1, Tiết 2; gạch đầu dòng literal <code>-</code>, đầy đủ Hướng dẫn về nhà &amp; Kế hoạch đánh giá 5 cột.
+                    <strong className="text-emerald-800">📄 Chuẩn V11-2 (4 phần A-B-C-D):</strong> Tiến trình 4 hoạt động lớn liền mạch; Kiến thức dạng cụm danh từ; Năng lực quan sát được không chia nhóm; Phẩm chất gắn với hành vi; Bảng 2 cột; Kết thúc tại Hướng dẫn về nhà.
                   </p>
                 ) : (
                   <p>
