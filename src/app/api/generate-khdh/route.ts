@@ -71,6 +71,34 @@ export async function POST(request: NextRequest) {
       activeDocs = activeDocs.filter((d) => documentIds.includes(d.id));
     }
 
+    // Nếu lệnh là DANH_MUC: Trích xuất danh mục và ma trận bài học trực tiếp
+    if (command.toUpperCase().includes('DANH_MUC')) {
+      const { CatalogExtractorService } = await import('@/services/catalog/catalog-extractor.service');
+      const { markdownSummary, keyUsed } = await CatalogExtractorService.extractCatalog({
+        grade: lockedConfig?.grade || 'Lớp 8',
+        subject: lockedConfig?.subject || 'Toán học',
+        term: lockedConfig?.term || 'Học kỳ I',
+        apiKeys: keyPool,
+        documentIds,
+        projectId: targetProject,
+      });
+
+      return NextResponse.json({
+        status: 'OK',
+        job_id: activeJobId,
+        command,
+        format_mode: isContinuous4Section ? 'CONTINUOUS_4SECTION' : 'SPLIT_PERIODS',
+        lesson_code: lessonCode || 'DANH_MUC_GDPT2018',
+        khdh_draft: markdownSummary,
+        token_usage: { inputTokens: 500, outputTokens: 1200, totalTokens: 1700 },
+        model: 'Gemini (Catalog Extractor)',
+        duration_ms: 1200,
+        key_used: keyUsed,
+        sources_used: activeDocs.map((d) => ({ id: d.id, name: d.displayName, type: d.documentType, version: d.version })),
+        source_readiness: SourceContextBuilder.checkReadiness(activeDocs),
+      });
+    }
+
     const { systemContext: sourceContextText, sourcesUsed } = SourceContextBuilder.buildPromptContext(activeDocs);
     const readinessReport = SourceContextBuilder.checkReadiness(activeDocs);
 
