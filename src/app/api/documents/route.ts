@@ -1,16 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { SourceDocumentService } from '@/services/documents/source-document.service';
 import { SourceDocumentType } from '@/types/source-document';
+import { resolveUserProjectIdFromRequest } from '@/lib/user-workspace';
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const projectId = searchParams.get('projectId') || 'default';
+    const projectId = await resolveUserProjectIdFromRequest(request, searchParams.get('projectId'));
     const documents = await SourceDocumentService.getAll(projectId);
     const readiness = await SourceDocumentService.getReadiness(projectId);
 
     return NextResponse.json({
       success: true,
+      projectId,
       documents,
       readiness,
     });
@@ -26,7 +28,8 @@ export async function POST(request: NextRequest) {
     const files = formData.getAll('files') as File[];
     const singleFile = formData.get('file') as File | null;
     const preferredType = formData.get('documentType') as SourceDocumentType | undefined;
-    const projectId = (formData.get('projectId') as string) || 'default';
+    const clientProjectId = formData.get('projectId') as string | null;
+    const projectId = await resolveUserProjectIdFromRequest(request, clientProjectId);
 
     const allFiles: File[] = [];
     if (singleFile) allFiles.push(singleFile);
@@ -61,9 +64,10 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
+      projectId,
       documents: createdDocs,
       document: createdDocs[0],
-      message: `Đã tải lên thành công ${createdDocs.length} tài liệu nguồn.`,
+      message: `Đã tải lên thành công ${createdDocs.length} tài liệu nguồn vào không gian riêng của bạn.`,
       readiness,
     });
   } catch (error) {

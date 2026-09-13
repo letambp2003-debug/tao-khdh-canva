@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { LessonAnalyzerService } from '@/services/analysis/lesson-analyzer.service';
 import { AnalyzeLessonRequest } from '@/types/lesson-analysis.types';
+import { resolveUserProjectIdFromRequest } from '@/lib/user-workspace';
 
 export async function POST(req: NextRequest) {
   try {
@@ -13,7 +14,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { analysis, keyUsed } = await LessonAnalyzerService.analyzeLesson(body);
+    const targetProject = await resolveUserProjectIdFromRequest(req, body.projectId);
+    const { analysis, keyUsed } = await LessonAnalyzerService.analyzeLesson({
+      ...body,
+      projectId: targetProject,
+    });
 
     return NextResponse.json({
       success: true,

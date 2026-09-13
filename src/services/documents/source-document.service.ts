@@ -1,10 +1,20 @@
 import fs from 'fs/promises';
 import path from 'path';
+import os from 'os';
 import { SourceDocument, SourceDocumentType, SourceReadinessReport } from '@/types/source-document';
 import { DocumentParserService } from './document-parser.service';
 import { SourceContextBuilder } from './source-context-builder';
 
-const STORAGE_DIR = process.env.STORAGE_DIR || path.join(process.cwd(), 'data', 'source-documents');
+function getStorageDir(): string {
+  try {
+    const dir = process.env.STORAGE_DIR || path.join(os.tmpdir(), 'khdh-source-docs');
+    return dir;
+  } catch {
+    return path.join(process.cwd(), 'data', 'source-documents');
+  }
+}
+
+const STORAGE_DIR = getStorageDir();
 const METADATA_FILE = path.join(STORAGE_DIR, 'documents-meta.json');
 
 let memoryDocuments: SourceDocument[] = [];
@@ -38,7 +48,7 @@ export class SourceDocumentService {
     }
   }
 
-  public static async getAll(projectId = 'default'): Promise<SourceDocument[]> {
+  public static async getAll(projectId = 'usr_guest'): Promise<SourceDocument[]> {
     await this.init();
     return memoryDocuments
       .filter((d) => d.projectId === projectId || projectId === 'all')
@@ -54,7 +64,7 @@ export class SourceDocumentService {
   public static async create(
     file: { name: string; size: number; type: string; buffer: Buffer },
     preferredType?: SourceDocumentType,
-    projectId = 'default'
+    projectId = 'usr_guest'
   ): Promise<SourceDocument> {
     await this.init();
     const docId = `DOC-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
@@ -97,7 +107,7 @@ export class SourceDocumentService {
   public static async replace(
     oldDocId: string,
     file: { name: string; size: number; type: string; buffer: Buffer },
-    projectId = 'default'
+    projectId?: string
   ): Promise<{ oldDoc: SourceDocument; newDoc: SourceDocument }> {
     await this.init();
     const oldIndex = memoryDocuments.findIndex((d) => d.id === oldDocId);
@@ -106,6 +116,7 @@ export class SourceDocumentService {
     }
 
     const oldDoc = memoryDocuments[oldIndex];
+    const targetProject = projectId || oldDoc.projectId || 'usr_guest';
     const newDocId = `DOC-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
     const now = new Date().toISOString();
     const safeFileName = `${newDocId}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
@@ -125,7 +136,7 @@ export class SourceDocumentService {
 
     const newDoc: SourceDocument = {
       id: newDocId,
-      projectId,
+      projectId: targetProject,
       documentType: oldDoc.documentType,
       originalFileName: file.name,
       displayName: file.name.replace(/\.[^/.]+$/, ''),
@@ -184,12 +195,12 @@ export class SourceDocumentService {
     return this.update(id, { isActive });
   }
 
-  public static async getReadiness(projectId = 'default'): Promise<SourceReadinessReport> {
+  public static async getReadiness(projectId = 'usr_guest'): Promise<SourceReadinessReport> {
     const docs = await this.getAll(projectId);
     return SourceContextBuilder.checkReadiness(docs);
   }
 
-  public static async getActiveReady(projectId = 'default'): Promise<SourceDocument[]> {
+  public static async getActiveReady(projectId = 'usr_guest'): Promise<SourceDocument[]> {
     const docs = await this.getAll(projectId);
     return docs.filter((d) => d.isActive && d.status === 'READY');
   }

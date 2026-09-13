@@ -5,6 +5,7 @@ import { SourceDocumentService } from '@/services/documents/source-document.serv
 import { SourceContextBuilder } from '@/services/documents/source-context-builder';
 import { ContentNormalizer } from '@/services/export/content-normalizer';
 import { checkRateLimit } from '@/lib/rate-limiter';
+import { resolveUserProjectIdFromRequest } from '@/lib/user-workspace';
 import { readFile } from 'fs/promises';
 import { join } from 'path';
 
@@ -55,7 +56,7 @@ export async function POST(request: NextRequest) {
 
     const env = getEnv();
     const activeJobId = jobId || `JOB-${Date.now()}`;
-    const targetProject = projectId || 'default';
+    const targetProject = await resolveUserProjectIdFromRequest(request, projectId);
 
     // Xác định chế độ xuất KHDH
     const isContinuous4Section =

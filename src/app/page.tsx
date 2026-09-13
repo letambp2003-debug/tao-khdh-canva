@@ -160,10 +160,14 @@ export default function Home() {
   const [showGcpGuideModal, setShowGcpGuideModal] = useState(false);
   const googleBtnContainerRef = useRef<HTMLDivElement | null>(null);
 
+  const getUserWorkspaceId = (user: UserSession | null): string => {
+    if (!user || !user.email) return 'usr_guest';
+    return 'usr_' + user.email.toLowerCase().trim().replace(/[^a-z0-9]/g, '_');
+  };
+
   // Check session and load documents on mount
   useEffect(() => {
     checkUserSession();
-    fetchDocuments();
 
     // Check localStorage for saved Google Client ID if any
     const savedClientId = localStorage.getItem('khdh_google_client_id');
@@ -171,6 +175,17 @@ export default function Home() {
       setGoogleClientId(savedClientId);
     }
   }, []);
+
+  // Fetch documents whenever the authenticated user changes
+  useEffect(() => {
+    if (currentUser) {
+      const wsId = getUserWorkspaceId(currentUser);
+      fetchDocuments(wsId);
+    } else {
+      setDocuments([]);
+      setReadiness(null);
+    }
+  }, [currentUser?.email]);
 
   // Initialize Google Identity Services (GIS)
   useEffect(() => {
@@ -330,20 +345,25 @@ export default function Home() {
     try {
       await fetch('/api/auth/logout', { method: 'POST' });
       setCurrentUser(null);
+      setDocuments([]);
+      setReadiness(null);
       ApiKeyService.clearClientKeys();
       setConfiguredKeyCount(0);
       setOutputData(null);
     } catch {
       setCurrentUser(null);
+      setDocuments([]);
+      setReadiness(null);
     }
   };
 
   const currentParsedKeys = ApiKeyService.parseKeys(rawKeysInput);
 
-  const fetchDocuments = async () => {
+  const fetchDocuments = async (wsIdOverride?: string) => {
     setDocLoading(true);
     try {
-      const res = await fetch('/api/documents');
+      const wsId = wsIdOverride || getUserWorkspaceId(currentUser);
+      const res = await fetch(`/api/documents?projectId=${encodeURIComponent(wsId)}`);
       const data = await res.json();
       if (data.success) {
         setDocuments(data.documents || []);
@@ -368,7 +388,9 @@ export default function Home() {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
+    const wsId = getUserWorkspaceId(currentUser);
     const formData = new FormData();
+    formData.append('projectId', wsId);
     for (let i = 0; i < files.length; i++) {
       formData.append('files', files[i]);
     }
@@ -386,7 +408,7 @@ export default function Home() {
       if (!res.ok || !data.success) {
         throw new Error(data.message || 'Lỗi khi tải tài liệu');
       }
-      await fetchDocuments();
+      await fetchDocuments(wsId);
     } catch (err: unknown) {
       const msg = (err as Error)?.message || 'Lỗi tải tệp';
       setError(msg);
@@ -408,9 +430,11 @@ export default function Home() {
     const files = e.target.files;
     if (!files || files.length === 0 || !replacingDocId) return;
 
+    const wsId = getUserWorkspaceId(currentUser);
     const file = files[0];
     const formData = new FormData();
     formData.append('file', file);
+    formData.append('projectId', wsId);
 
     setDocLoading(true);
     try {
@@ -422,7 +446,7 @@ export default function Home() {
       if (!res.ok || !data.success) {
         throw new Error(data.message || 'Lỗi khi thay thế tài liệu');
       }
-      await fetchDocuments();
+      await fetchDocuments(wsId);
     } catch (err: unknown) {
       const msg = (err as Error)?.message || 'Lỗi thay thế tệp';
       setError(msg);
@@ -434,13 +458,14 @@ export default function Home() {
 
   const handleToggleDocActive = async (id: string, currentActive: boolean) => {
     try {
+      const wsId = getUserWorkspaceId(currentUser);
       const res = await fetch(`/api/documents/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ isActive: !currentActive }),
       });
       if (res.ok) {
-        await fetchDocuments();
+        await fetchDocuments(wsId);
       }
     } catch (err) {
       console.error('Error toggling document:', err);
@@ -450,6 +475,7 @@ export default function Home() {
   const handleSaveDocEdit = async () => {
     if (!editingDoc) return;
     try {
+      const wsId = getUserWorkspaceId(currentUser);
       const res = await fetch(`/api/documents/${editingDoc.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -460,7 +486,7 @@ export default function Home() {
       });
       if (res.ok) {
         setEditingDoc(null);
-        await fetchDocuments();
+        await fetchDocuments(wsId);
       }
     } catch (err) {
       console.error('Error updating document:', err);
@@ -469,12 +495,13 @@ export default function Home() {
 
   const handleDeleteDocument = async (id: string) => {
     try {
+      const wsId = getUserWorkspaceId(currentUser);
       const res = await fetch(`/api/documents/${id}`, {
         method: 'DELETE',
       });
       if (res.ok) {
         setDeleteConfirmDoc(null);
-        await fetchDocuments();
+        await fetchDocuments(wsId);
       }
     } catch (err) {
       console.error('Error deleting document:', err);
@@ -547,6 +574,7 @@ export default function Home() {
     setError(null);
 
     try {
+      const wsId = getUserWorkspaceId(currentUser);
       const activeKeys = currentParsedKeys.length > 0 ? currentParsedKeys : ApiKeyService.getClientKeys();
       const activeDocIds = documents.filter((d) => d.isActive && d.status === 'READY').map((d) => d.id);
 
@@ -558,6 +586,7 @@ export default function Home() {
           command: command.trim(),
           apiKeys: activeKeys,
           documentIds: activeDocIds,
+          projectId: wsId,
         }),
       });
 
@@ -625,6 +654,7 @@ export default function Home() {
     abortControllerRef.current = controller;
 
     try {
+      const wsId = getUserWorkspaceId(currentUser);
       const activeKeys = currentParsedKeys.length > 0 ? currentParsedKeys : ApiKeyService.getClientKeys();
       const jobId = `JOB-${Date.now()}`;
 
@@ -649,6 +679,7 @@ export default function Home() {
           jobId,
           apiKeys: activeKeys,
           documentIds: activeDocIds,
+          projectId: wsId,
           lockedConfig: targetConfig,
         }),
         signal: controller.signal,
@@ -1328,11 +1359,18 @@ export default function Home() {
       <section className="mb-6 bg-white p-5 rounded-2xl shadow-sm border border-slate-200 space-y-4">
         <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 border-b border-slate-100 pb-3">
           <div>
-            <h2 className="text-lg font-black text-slate-800 flex items-center gap-2">
-              <span>📚</span> TÀI LIỆU NGUỒN
-            </h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-black text-slate-800 flex items-center gap-2">
+                <span>📚</span> TÀI LIỆU NGUỒN
+              </h2>
+              {currentUser && (
+                <span className="bg-emerald-50 text-emerald-800 text-[11px] font-bold px-2 py-0.5 rounded-full border border-emerald-200 flex items-center gap-1">
+                  <span>🔒</span> Không gian riêng: {currentUser.name || currentUser.email}
+                </span>
+              )}
+            </div>
             <p className="text-xs text-slate-500 mt-0.5">
-              Căn cứ pháp lý & học liệu chính thức cho AI biên soạn KHDH (Thứ tự ưu tiên: Phụ lục I &gt; PPCT &gt; SGK &gt; KHDH cũ)
+              Căn cứ pháp lý & học liệu chính thức cho AI biên soạn KHDH (Thứ tự ưu tiên: Phụ lục I &gt; PPCT &gt; SGK &gt; KHDH cũ). Tài liệu được bảo mật và cách ly 100% theo từng tài khoản.
             </p>
           </div>
 
