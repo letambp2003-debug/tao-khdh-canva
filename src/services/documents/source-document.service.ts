@@ -1,3 +1,4 @@
+import { CatalogExtractorService } from '@/services/catalog/catalog-extractor.service';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
@@ -90,6 +91,18 @@ export class SourceDocumentService {
 
     const { text, summary } = await DocumentParserService.parseDocumentBuffer(file.name, file.buffer, file.type);
 
+    // Vô hiệu hóa tài liệu cũ cùng loại trong không gian này để không bị nạp chồng chéo/dữ liệu đệm
+    let nextVersion = 1;
+    for (const doc of memoryDocuments) {
+      if (doc.projectId === projectId && doc.documentType === docType && doc.isActive) {
+        doc.isActive = false;
+        doc.status = 'REPLACED';
+        doc.replacedBy = docId;
+        doc.updatedAt = now;
+        nextVersion = Math.max(nextVersion, doc.version + 1);
+      }
+    }
+
     const newDoc: SourceDocument = {
       id: docId,
       projectId,
@@ -100,7 +113,7 @@ export class SourceDocumentService {
       fileSize: file.size,
       storagePath: filePath,
       status: 'READY',
-      version: 1,
+      version: nextVersion,
       isActive: true,
       contentSummary: summary,
       extractedText: text,
@@ -110,6 +123,14 @@ export class SourceDocumentService {
 
     memoryDocuments.unshift(newDoc);
     await this.persist();
+
+    // XÓA NGAY BỘ NHỚ ĐỆM DANH MỤC CŨ để dữ liệu mới có hiệu lực tức thì
+    try {
+      await CatalogExtractorService.clearCatalog(projectId);
+    } catch (err) {
+      console.warn('Could not clear catalog cache:', err);
+    }
+
     return newDoc;
   }
 
@@ -163,6 +184,14 @@ export class SourceDocumentService {
 
     memoryDocuments.unshift(newDoc);
     await this.persist();
+
+    // XÓA NGAY BỘ NHỚ ĐỆM DANH MỤC CŨ
+    try {
+      await CatalogExtractorService.clearCatalog(targetProject);
+    } catch (err) {
+      console.warn('Could not clear catalog cache:', err);
+    }
+
     return { oldDoc, newDoc };
   }
 
