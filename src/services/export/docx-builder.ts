@@ -77,6 +77,170 @@ function parseLineSegments(line: string): Segment[] {
   return segments;
 }
 
+interface HeaderMetadata {
+  schoolName: string;
+  department: string;
+  teacherName: string;
+  lessonTitle: string;
+  subjectGrade: string;
+  durationPpct: string;
+}
+
+function extractHeaderMetadata(markdown: string, options: WordExportOptions): HeaderMetadata {
+  let schoolName = options.schoolName || 'TRƯỜNG THCS QUANG TRUNG';
+  let department = options.department || 'TỔ: TOÁN TIN';
+  let teacherName = options.teacherName || 'LÊ TÂM';
+  let lessonTitle = '';
+  let subjectGrade = 'Môn học: Toán – Lớp: 8';
+  let durationPpct = '';
+
+  const lines = markdown.split('\n');
+  let rawPpct = '';
+  let rawDuration = '';
+  let rawWeek = '';
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    // School
+    const schoolMatch = line.match(/^TRƯỜNG(?:\s*THCS)?\s*:\s*([^\n\|<]+)/i);
+    if (schoolMatch) schoolName = schoolMatch[1].trim().toUpperCase();
+
+    // Dept
+    const deptMatch = line.match(/^TỔ\s*:\s*([^\n\|<]+)/i);
+    if (deptMatch) {
+      const d = deptMatch[1].trim().toUpperCase();
+      department = d.startsWith('TỔ') ? d : `TỔ: ${d}`;
+    }
+
+    // Teacher
+    const teacherMatch = line.match(/^(?:Họ tên giáo viên|Giáo viên)\s*:\s*([^\n\|<]+)/i);
+    if (teacherMatch) teacherName = teacherMatch[1].trim().toUpperCase();
+
+    // Lesson Title
+    const titleMatch = line.match(/^##?\s*\*\*?(BÀI\s+[0-9]+[^\*\n]+)\*\*?/i)
+      || line.match(/^(BÀI\s+[0-9]+[\.:\s]+[^\n]+)/i);
+    if (titleMatch && !lessonTitle) {
+      lessonTitle = titleMatch[1].trim().toUpperCase();
+    }
+
+    // Subject & Grade
+    const subjMatch = line.match(/^Môn học\s*:\s*([^–\-\n]+)\s*[–\-]\s*Lớp\s*:\s*([^\n]+)/i);
+    if (subjMatch) {
+      subjectGrade = `Môn học: ${subjMatch[1].trim()} – Lớp: ${subjMatch[2].trim()}`;
+    }
+
+    // Duration / PPCT / Week
+    const durMatch = line.match(/^(?:Thời lượng|Thời gian thực hiện)\s*:\s*([^\n]+)/i);
+    if (durMatch) rawDuration = durMatch[1].trim();
+
+    const ppctMatch = line.match(/^PPCT\s*:\s*([^\n]+)/i);
+    if (ppctMatch) rawPpct = ppctMatch[1].trim();
+
+    const weekMatch = line.match(/^Tuần\s*:\s*([^\n]+)/i);
+    if (weekMatch) rawWeek = weekMatch[1].trim();
+  }
+
+  // Fallback for lessonTitle
+  if (!lessonTitle) {
+    if (options.title && options.title !== 'Kế hoạch bài dạy') {
+      lessonTitle = options.title.toUpperCase();
+    } else if (options.lessonCode) {
+      const parenMatch = options.lessonCode.match(/\(([^)]+)\)/);
+      if (parenMatch) {
+        lessonTitle = parenMatch[1].trim().toUpperCase();
+      } else {
+        lessonTitle = options.lessonCode.toUpperCase();
+      }
+    } else {
+      lessonTitle = 'BÀI 2. ĐA THỨC';
+    }
+  }
+
+  // Format Duration & PPCT string
+  if (rawDuration || rawPpct || rawWeek) {
+    const parts: string[] = [];
+    if (rawDuration) {
+      const durText = rawDuration.endsWith('tiết') ? rawDuration : `${rawDuration} tiết`;
+      parts.push(`Thời gian thực hiện: ${durText}`);
+    } else {
+      parts.push('Thời gian thực hiện: 2 tiết');
+    }
+    if (rawPpct) {
+      const ppctClean = rawPpct.startsWith('Tiết') ? rawPpct : `Tiết ${rawPpct}`;
+      parts.push(`PPCT: ${ppctClean}`);
+    }
+    if (rawWeek) {
+      const weekClean = rawWeek.startsWith('Tuần') ? rawWeek : `Tuần ${rawWeek}`;
+      parts.push(`Tuần: ${weekClean}`);
+    }
+    durationPpct = `(${parts.join(' | ')})`;
+  } else {
+    const fullTimeMatch = markdown.match(/\((?:Thời gian thực hiện|Thời lượng):[^\)]+\)/i);
+    if (fullTimeMatch) {
+      durationPpct = fullTimeMatch[0].trim();
+    } else {
+      durationPpct = '(Thời gian thực hiện: 2 tiết | PPCT: Tiết 3, Tiết 4 | Tuần: Tuần 1)';
+    }
+  }
+
+  return {
+    schoolName,
+    department,
+    teacherName,
+    lessonTitle,
+    subjectGrade,
+    durationPpct,
+  };
+}
+
+function extractBodyLines(markdown: string): string[] {
+  const lines = markdown.split('\n');
+  
+  // Find where Section I (MỤC TIÊU) starts
+  let targetIndex = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (/^(?:#+\s*)?(?:I|1)\.\s*MỤC TIÊU/i.test(trimmed)) {
+      targetIndex = i;
+      break;
+    }
+  }
+
+  if (targetIndex !== -1) {
+    return lines.slice(targetIndex);
+  }
+
+  // If not found, skip any leading metadata / header table lines
+  const body: string[] = [];
+  let pastHeader = false;
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!pastHeader) {
+      if (
+        line.startsWith('TRƯỜNG') ||
+        line.startsWith('TỔ:') ||
+        line.startsWith('Họ tên') ||
+        line.startsWith('Môn học:') ||
+        line.startsWith('Thời lượng:') ||
+        line.startsWith('PPCT:') ||
+        line.startsWith('Tuần:') ||
+        line.startsWith('|') ||
+        line.startsWith('---') ||
+        line.startsWith('# 1. PHẦN ĐẦU') ||
+        line.startsWith('```') ||
+        line.startsWith('# FORM')
+      ) {
+        continue;
+      }
+      pastHeader = true;
+    }
+    body.push(rawLine);
+  }
+  return body;
+}
+
 export class DocxBuilder {
   private mathMode: MathExportMode;
   private profile: ProfileConfig;
@@ -131,7 +295,7 @@ export class DocxBuilder {
         }
       } else {
         let raw = seg.content;
-        const parts = raw.split(/(\*\*.*?\*\*|\*.*?\*)/g);
+        const parts = raw.split(/(\b|\*\*.*?\*\*|\*.*?\*)/g);
         for (const p of parts) {
           if (!p) continue;
           if (p.startsWith('**') && p.endsWith('**') && p.length >= 4) {
@@ -173,45 +337,148 @@ export class DocxBuilder {
 
   public build(options: WordExportOptions): Document {
     const docElements: (Paragraph | Table)[] = [];
+    const meta = extractHeaderMetadata(options.markdown, options);
 
-    // 1. Header (School & Department) - Compact publication style
+    // 1. Top Header (2-column borderless table)
+    const borderNone = { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' };
+
+    const headerTable = new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      borders: {
+        top: borderNone,
+        bottom: borderNone,
+        left: borderNone,
+        right: borderNone,
+        insideHorizontal: borderNone,
+        insideVertical: borderNone,
+      },
+      rows: [
+        new TableRow({
+          cantSplit: true,
+          children: [
+            new TableCell({
+              width: { size: 55, type: WidthType.PERCENTAGE },
+              borders: { top: borderNone, bottom: borderNone, left: borderNone, right: borderNone },
+              children: [
+                new Paragraph({
+                  alignment: AlignmentType.CENTER,
+                  spacing: { before: 0, after: 20, line: 240 },
+                  children: [
+                    new TextRun({
+                      text: meta.schoolName,
+                      bold: true,
+                      size: 24, // 12pt
+                      font: this.profile.fontFamily,
+                      color: '000000',
+                    }),
+                  ],
+                }),
+                new Paragraph({
+                  alignment: AlignmentType.CENTER,
+                  spacing: { before: 0, after: 40, line: 240 },
+                  children: [
+                    new TextRun({
+                      text: meta.department.startsWith('TỔ') ? meta.department : `TỔ: ${meta.department}`,
+                      bold: true,
+                      size: 24, // 12pt
+                      font: this.profile.fontFamily,
+                      color: '000000',
+                    }),
+                  ],
+                }),
+              ],
+            }),
+            new TableCell({
+              width: { size: 45, type: WidthType.PERCENTAGE },
+              borders: { top: borderNone, bottom: borderNone, left: borderNone, right: borderNone },
+              children: [
+                new Paragraph({
+                  alignment: AlignmentType.CENTER,
+                  spacing: { before: 0, after: 20, line: 240 },
+                  children: [
+                    new TextRun({
+                      text: 'Họ tên giáo viên:',
+                      size: 24, // 12pt
+                      font: this.profile.fontFamily,
+                      color: '000000',
+                    }),
+                  ],
+                }),
+                new Paragraph({
+                  alignment: AlignmentType.CENTER,
+                  spacing: { before: 0, after: 40, line: 240 },
+                  children: [
+                    new TextRun({
+                      text: meta.teacherName,
+                      bold: true,
+                      size: 24, // 12pt
+                      font: this.profile.fontFamily,
+                      color: '000000',
+                    }),
+                  ],
+                }),
+              ],
+            }),
+          ],
+        }),
+      ],
+    });
+
+    docElements.push(headerTable);
+
+    // 2. Centered Title Block
     docElements.push(
       new Paragraph({
+        alignment: AlignmentType.CENTER,
+        spacing: { before: 140, after: 40 },
+        keepNext: true,
         children: [
           new TextRun({
-            text: `${options.schoolName || 'TRƯỜNG THCS QUANG TRUNG'} | ${options.department || 'TỔ TOÁN TIN'}`.toUpperCase(),
+            text: meta.lessonTitle,
             bold: true,
-            size: this.profile.heading2Size,
+            size: 32, // 16pt
             font: this.profile.fontFamily,
-            color: '000000',
+            color: '0F4C81', // Dark Blue
           }),
         ],
-        alignment: AlignmentType.CENTER,
-        spacing: { before: 0, after: 60 },
-        keepNext: true,
       })
     );
 
-    if (options.teacherName) {
-      docElements.push(
-        new Paragraph({
-          children: [
-            new TextRun({
-              text: `Giáo viên thực hiện: ${options.teacherName} — Năm học: 2026 - 2027`,
-              italics: true,
-              size: this.profile.bodyFontSize - 2,
-              font: this.profile.fontFamily,
-              color: '333333',
-            }),
-          ],
-          alignment: AlignmentType.CENTER,
-          spacing: { before: 0, after: 140 },
-          keepNext: true,
-        })
-      );
-    }
+    docElements.push(
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        spacing: { before: 0, after: 30 },
+        keepNext: true,
+        children: [
+          new TextRun({
+            text: meta.subjectGrade,
+            italics: true,
+            size: 26, // 13pt
+            font: this.profile.fontFamily,
+            color: '333333',
+          }),
+        ],
+      })
+    );
 
-    const lines = options.markdown.split('\n');
+    docElements.push(
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        spacing: { before: 0, after: 180 },
+        keepNext: true,
+        children: [
+          new TextRun({
+            text: meta.durationPpct,
+            italics: true,
+            size: 24, // 12pt
+            font: this.profile.fontFamily,
+            color: '555555',
+          }),
+        ],
+      })
+    );
+
+    const bodyLines = extractBodyLines(options.markdown);
     let inTable = false;
     let tableRows: string[][] = [];
 
@@ -273,8 +540,8 @@ export class DocxBuilder {
       inTable = false;
     };
 
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
+    for (let i = 0; i < bodyLines.length; i++) {
+      const line = bodyLines[i].trim();
 
       // Check Table line
       if (line.startsWith('|') && line.endsWith('|')) {
@@ -297,51 +564,58 @@ export class DocxBuilder {
       }
 
       // Headings with keepNext = true
-      if (line.startsWith('# ')) {
+      if (line.startsWith('# ') || /^(?:I|II|III|IV|V|VI)\.\s+/i.test(line)) {
+        const textContent = line.replace(/^#+\s*/, '').replace(/^\*\*|\*\*$/g, '').trim();
         docElements.push(
           new Paragraph({
             heading: HeadingLevel.HEADING_1,
             children: [
               new TextRun({
-                text: line.slice(2),
+                text: textContent,
                 bold: true,
                 size: this.profile.heading1Size,
                 font: this.profile.fontFamily,
-                color: '000000',
+                color: '0F4C81',
               }),
             ],
             spacing: { before: 160, after: 80, line: this.profile.lineSpacing },
             keepNext: true,
           })
         );
-      } else if (line.startsWith('## ')) {
+      } else if (
+        line.startsWith('## ') ||
+        /^(?:1|2|3|4|5)\.\s+(?:Kiến thức|Năng lực|Phẩm chất|Giáo viên|Học sinh)/i.test(line) ||
+        /^[A-D]\.\s+HOẠT ĐỘNG/i.test(line)
+      ) {
+        const textContent = line.replace(/^##\s*/, '').replace(/^\*\*|\*\*$/g, '').trim();
         docElements.push(
           new Paragraph({
             heading: HeadingLevel.HEADING_2,
             children: [
               new TextRun({
-                text: line.slice(3),
+                text: textContent,
                 bold: true,
                 size: this.profile.heading2Size,
                 font: this.profile.fontFamily,
-                color: '000000',
+                color: '0284C7',
               }),
             ],
             spacing: { before: 120, after: 60, line: this.profile.lineSpacing },
             keepNext: true,
           })
         );
-      } else if (line.startsWith('### ')) {
+      } else if (line.startsWith('### ') || /^[a-z]\)\s+/i.test(line)) {
+        const textContent = line.replace(/^###\s*/, '').replace(/^\*\*|\*\*$/g, '').trim();
         docElements.push(
           new Paragraph({
             heading: HeadingLevel.HEADING_3,
             children: [
               new TextRun({
-                text: line.slice(4),
+                text: textContent,
                 bold: true,
                 size: this.profile.heading3Size,
                 font: this.profile.fontFamily,
-                color: '000000',
+                color: '0369A1',
               }),
             ],
             spacing: { before: 80, after: 40, line: this.profile.lineSpacing },

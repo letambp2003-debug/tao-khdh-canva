@@ -853,8 +853,7 @@ export default function Home() {
       });
 
       const contentDisposition = res.headers.get('Content-Disposition') || '';
-      const profileSuffix = printProfile === 'COMPACT_PRINT' ? 'COMPACT' : 'STD';
-      let filename = `KHDH_${outputData.lesson_code || 'V10'}_${mathMode.toUpperCase()}_${profileSuffix}_${Date.now()}.docx`;
+      let filename = `TIET_${outputData.lesson_code ? outputData.lesson_code.replace(/[^a-zA-Z0-9]/g, '_') : '1_2_BAI_HOC'}.docx`;
       
       const match = contentDisposition.match(/filename="?([^"]+)"?/);
       if (match && match[1]) {
