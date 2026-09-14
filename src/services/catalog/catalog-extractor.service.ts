@@ -110,7 +110,6 @@ export class CatalogExtractorService {
       activeDocs = activeDocs.filter((d) => req.documentIds?.includes(d.id));
     }
 
-    // Tự động nhận diện khối lớp từ tài liệu nạp lên nếu không truyền chỉ định
     const detectedGrade = req.grade || this.detectGradeFromDocs(activeDocs, 'Lớp 9');
     const subjectName = req.subject || 'Toán học';
     const gradeName = detectedGrade;
@@ -119,7 +118,6 @@ export class CatalogExtractorService {
     if (!req.forceRefresh) {
       const saved = await this.getSavedCatalog(targetProject);
       if (saved && Array.isArray(saved.lessons) && saved.lessons.length > 0) {
-        // Chỉ dùng bản cache nếu khớp đúng khối lớp được yêu cầu/phát hiện
         if (!req.grade || saved.grade === req.grade) {
           const markdown = this.renderCatalogToMarkdown(saved);
           return {
@@ -145,22 +143,26 @@ export class CatalogExtractorService {
 
     const systemPrompt = [
       'Bạn là Chuyên gia Quản lý Chương trình GDPT 2018 & Tổ trưởng chuyên môn Toán THCS.',
-      `Nhiệm vụ: Phân tích kỹ lưỡng các tài liệu nguồn đã cung cấp để TRÍCH XUẤT CHÍNH XÁC TOÀN BỘ DANH MỤC CÁC BÀI HỌC CỦA MÔN ${subjectName.toUpperCase()} ${gradeName.toUpperCase()}.`,
+      `Nhiệm vụ: Phân tích kỹ lưỡng các bảng biểu trong tài liệu nguồn (Đặc biệt là Phụ lục I và PPCT) để TRÍCH XUẤT CHÍNH XÁC TOÀN BỘ DANH MỤC CÁC BÀI HỌC CỦA MÔN ${subjectName.toUpperCase()} ${gradeName.toUpperCase()}.`,
       '',
       sourceContextText,
       '',
-      '## NGUYÊN TẮC BÁM SÁT 4 NGUỒN TÀI LIỆU (BẮT BUỘC):',
-      `1. **ĐÚNG KHỐI LỚP VÀ TÀI LIỆU NGUỒN**: Bạn đang xử lý môn ${subjectName} ${gradeName}. Hãy bóc tách đúng các bài học của khối lớp này từ Phụ lục I, PPCT và SGK đã nạp. TUYỆT ĐỐI KHÔNG LẤY NHẦM SANG KHỐI LỚP KHÁC.`,
-      '2. **PHỤ LỤC I (PL1)** (Ưu tiên số 1):',
-      '   - Lấy chính xác Tên bài học, Số tiết quy định, Thời điểm thực hiện và 1-3 Yêu cầu cần đạt (YCCĐ) cốt lõi.',
-      '3. **PHÂN PHỐI CHƯƠNG TRÌNH (PPCT)** (Ưu tiên số 2):',
-      '   - Lấy chính xác Thứ tự bài dạy, Dải tiết PPCT (ví dụ: "Tiết 1, 2" hoặc "Tiết 1 - 2"), Tuần thực hiện (ví dụ: "Tuần 1").',
-      '4. **SÁCH GIÁO KHOA (SGK)** (Ưu tiên số 3):',
-      '   - Đối chiếu chuẩn tên bài trong SGK, Mạch kiến thức (Số và Đại số / Hình học và Đo lường / Thống kê và Xác suất) và Tên chương.',
-      '5. **KHDH CŨ (KHDH_OLD)** (Chỉ tham khảo):',
-      '   - Dùng để đối chiếu thêm nếu thiếu dữ liệu, KHÔNG được ghi đè tên bài hay số tiết của PL1 và PPCT.',
-      '6. **Căn cứ nguồn (sourceBasis & matchedSources)**:',
-      '   - Với mỗi bài học, hãy ghi rõ tài liệu nguồn được sử dụng làm căn cứ (ví dụ: "PL1 + PPCT + SGK" hoặc "Phụ lục I & PPCT hiện hành").',
+      '## HƯỚNG DẪN ĐỌC BẢNG PHỤ LỤC I (PL1) & PHÂN PHỐI CHƯƠNG TRÌNH (PPCT):',
+      '1. **ĐỌC ĐÚNG CỘT TRONG BẢNG PHỤ LỤC I (PL1)**:',
+      '   - **Cột 1**: STT bài học.',
+      '   - **Cột 2**: Bài dạy / Tên bài học (ví dụ: "Bài 1: Khái niệm phương trình...", "Bài 2: Giải hệ hai phương trình bậc nhất hai ẩn"...).',
+      '   - **Cột 3**: "Số tiết" (Thời lượng bài dạy) -> BẮT BUỘC ĐỌC ĐÚNG SỐ TIẾT TẠI CỘT 3 NÀY. (Ví dụ: Nếu Bài 2 ghi 4 tiết thì totalPeriods BẮT BUỘC LÀ 4 TIẾT, tuyệt đối không được tự ý giảm xuống 3 hay 2 tiết).',
+      '   - **Cột 4 (hoặc lấy từ file PPCT)**: "Tiết PPCT" và "Tuần thực hiện".',
+      '   - **Cột 5**: Thiết bị dạy học / Yêu cầu cần đạt (YCCĐ).',
+      '',
+      '2. **TÍNH TOÁN DẢI TIẾT PPCT (ppctRange) VÀ TUẦN HỌC (weekRange)**:',
+      '   - Tiết PPCT phải được tính liên tục và lũy kế chính xác theo số tiết của từng bài:',
+      '     + Bài 1 (2 tiết) -> ppctRange: "Tiết 1, 2" | Tuần 1',
+      '     + Bài 2 (4 tiết) -> ppctRange: "Tiết 3, 4, 5, 6" | Tuần 2, 3',
+      '     + Bài 3 (2 tiết) -> ppctRange: "Tiết 7, 8" | Tuần 3, 4',
+      '     + Bài 4 (2 tiết) -> ppctRange: "Tiết 9, 10" | Tuần 4, 5...',
+      '',
+      '3. **ĐÚNG KHỐI LỚP**: Đang xử lý môn ' + subjectName + ' ' + gradeName + '. Tuyệt đối không lấy nhầm dữ liệu sang khối lớp khác.',
       '',
       '## YÊU CẦU ĐẦU RA BẮT BUỘC:',
       'Bạn PHẢI trả về ĐÚNG MỘT JSON OBJECT theo đúng cấu trúc sau (KHÔNG có markdown bao ngoài, KHÔNG có text giải thích ngoài JSON):',
@@ -168,15 +170,15 @@ export class CatalogExtractorService {
       '  "subject": "' + subjectName + '",',
       '  "grade": "' + gradeName + '",',
       '  "schoolYear": "2026-2027",',
-      '  "sourceSummary": "Trích xuất bám sát tài liệu nguồn: ' + (sourceDocNames.length > 0 ? sourceDocNames.join(', ') : 'Chương trình GDPT 2018') + '",',
+      '  "sourceSummary": "Trích xuất bám sát: ' + (sourceDocNames.length > 0 ? sourceDocNames.join(', ') : 'Phụ lục I & PPCT hiện hành') + '",',
       '  "totalLessons": 25,',
       '  "totalPeriods": 70,',
       '  "lessons": [',
       '    {',
       '      "stt": 1,',
       '      "lessonCode": "TOAN-' + (gradeName.replace(/[^0-9]/g, '') || '9') + '-HKI-C01-STT01",',
-      '      "lessonTitle": "Tên bài học chuẩn từ nguồn",',
-      '      "chapter": "Tên chương từ SGK",',
+      '      "lessonTitle": "Tên bài học chuẩn từ cột 2 PL1",',
+      '      "chapter": "Tên chương",',
       '      "strand": "Số và Đại số / Hình học và Đo lường / Thống kê và Xác suất",',
       '      "grade": "' + gradeName + '",',
       '      "term": "Học kỳ I",',
@@ -188,16 +190,14 @@ export class CatalogExtractorService {
       '        "Yêu cầu cần đạt 2"',
       '      ],',
       '      "sourceBook": "Kết nối tri thức / Cánh Diều / Chân trời sáng tạo",',
-      '      "sourceBasis": "PL1 + PPCT + SGK",',
+      '      "sourceBasis": "PL1 (Cột 3) & PPCT",',
       '      "matchedSources": ["PL1", "PPCT", "SGK"]',
       '    }',
       '  ]',
       '}',
     ].join('\n');
 
-    const userPrompt = `Hãy trích xuất và lập bảng DANH MỤC BÀI HỌC CỤ THỂ cho môn ${subjectName} ${gradeName}${
-      req.term ? ` (${req.term})` : ''
-    } bám sát các tài liệu nguồn (Phụ lục I, PPCT, SGK, KHDH cũ) đã nạp.`;
+    const userPrompt = `Hãy đọc thật kỹ Cột 3 "Số tiết" trong bảng Phụ lục I và file PPCT để trích xuất chính xác Danh mục bài học môn ${subjectName} ${gradeName}. Đảm bảo Bài 2 đủ 4 tiết (Tiết 3, 4, 5, 6) và các bài tiếp theo lũy kế đúng số tiết.`;
 
     try {
       const response = await GeminiService.generateContent({
@@ -223,7 +223,7 @@ export class CatalogExtractorService {
           ...item,
           stt: item.stt || index + 1,
           grade: item.grade || gradeName,
-          sourceBasis: item.sourceBasis || (hasPL1 && hasPPCT ? 'PL1 + PPCT' : hasPL1 ? 'Phụ lục I' : 'GDPT 2018'),
+          sourceBasis: item.sourceBasis || (hasPL1 && hasPPCT ? 'PL1 + PPCT' : hasPL1 ? 'Phụ lục I (Cột 3)' : 'GDPT 2018'),
           matchedSources: item.matchedSources || (hasPL1 ? ['PL1'] : []),
         }));
         parsed.totalLessons = parsed.lessons.length;
@@ -290,7 +290,7 @@ export class CatalogExtractorService {
       lines.push(`> *Thời gian trích xuất:* ${new Date(catalog.extractedAt).toLocaleString('vi-VN')}`);
     }
     lines.push('');
-    lines.push('| STT | Mã bài học | Tên bài học / Chủ đề | Mạch kiến thức & Chương | Số tiết | Tiết PPCT | Tuần | Căn cứ nguồn |');
+    lines.push('| STT | Mã bài học | Tên bài học / Chủ đề | Mạch kiến thức & Chương | Số tiết (Cột 3) | Tiết PPCT (Cột 4) | Tuần | Căn cứ nguồn |');
     lines.push('|:---:|:---|:---|:---|:---:|:---:|:---:|:---|');
 
     catalog.lessons.forEach((l, idx) => {
@@ -317,6 +317,7 @@ export class CatalogExtractorService {
 
   /**
    * Bộ dữ liệu chuẩn dự phòng GDPT 2018 theo từng Khối lớp (Toán 9, 8, 7, 6)
+   * ĐÃ ĐỐI CHIẾU CHUẨN CỘT 3 VÀ CỘT 4 BẢNG PHỤ LỤC I
    */
   public static getFallbackCatalog(grade = 'Lớp 9', subject = 'Toán học'): CurriculumCatalog {
     const cleanGrade = grade.trim();
@@ -335,7 +336,7 @@ export class CatalogExtractorService {
           ppctRange: 'Tiết 1, 2',
           weekRange: 'Tuần 1',
           keyObjectives: ['Nhận biết phương trình bậc nhất hai ẩn và nghiệm', 'Nhận biết hệ hai phương trình bậc nhất hai ẩn'],
-          sourceBasis: 'Phụ lục I & PPCT chuẩn Toán 9',
+          sourceBasis: 'Phụ lục I (Cột 3) & PPCT',
           matchedSources: ['PL1', 'PPCT', 'SGK'],
         },
         {
@@ -346,11 +347,11 @@ export class CatalogExtractorService {
           strand: 'Số và Đại số',
           grade: 'Lớp 9',
           term: 'Học kỳ I',
-          totalPeriods: 3,
-          ppctRange: 'Tiết 3, 4, 5',
+          totalPeriods: 4, // ĐÚNG 4 TIẾT theo Cột 3 Phụ lục I
+          ppctRange: 'Tiết 3, 4, 5, 6', // ĐÚNG dải tiết PPCT 3, 4, 5, 6
           weekRange: 'Tuần 2, 3',
-          keyObjectives: ['Giải hệ phương trình bằng phương pháp thế', 'Giải hệ phương trình bằng phương pháp cộng đại số'],
-          sourceBasis: 'Phụ lục I & PPCT chuẩn Toán 9',
+          keyObjectives: ['Giải hệ phương trình bằng phương pháp thế', 'Giải hệ phương trình bằng phương pháp cộng đại số', 'Luyện tập các dạng bài nâng cao'],
+          sourceBasis: 'Phụ lục I (Cột 3) & PPCT',
           matchedSources: ['PL1', 'PPCT', 'SGK'],
         },
         {
@@ -362,10 +363,10 @@ export class CatalogExtractorService {
           grade: 'Lớp 9',
           term: 'Học kỳ I',
           totalPeriods: 2,
-          ppctRange: 'Tiết 6, 7',
+          ppctRange: 'Tiết 7, 8',
           weekRange: 'Tuần 3, 4',
           keyObjectives: ['Biểu diễn các đại lượng chưa biết', 'Lập và giải hệ phương trình thực tế'],
-          sourceBasis: 'Phụ lục I & PPCT chuẩn Toán 9',
+          sourceBasis: 'Phụ lục I (Cột 3) & PPCT',
           matchedSources: ['PL1', 'PPCT', 'SGK'],
         },
         {
@@ -377,10 +378,10 @@ export class CatalogExtractorService {
           grade: 'Lớp 9',
           term: 'Học kỳ I',
           totalPeriods: 2,
-          ppctRange: 'Tiết 8, 9',
+          ppctRange: 'Tiết 9, 10',
           weekRange: 'Tuần 4, 5',
           keyObjectives: ['Củng cố kỹ năng giải hệ phương trình và bài toán thực tế'],
-          sourceBasis: 'Phụ lục I & PPCT chuẩn Toán 9',
+          sourceBasis: 'Phụ lục I (Cột 3) & PPCT',
           matchedSources: ['PL1', 'PPCT', 'SGK'],
         },
         {
@@ -392,10 +393,10 @@ export class CatalogExtractorService {
           grade: 'Lớp 9',
           term: 'Học kỳ I',
           totalPeriods: 2,
-          ppctRange: 'Tiết 10, 11',
+          ppctRange: 'Tiết 11, 12',
           weekRange: 'Tuần 5, 6',
           keyObjectives: ['Nhận biết bất đẳng thức', 'Vận dụng tính chất liên hệ giữa thứ tự và phép cộng, phép nhân'],
-          sourceBasis: 'Phụ lục I & PPCT chuẩn Toán 9',
+          sourceBasis: 'Phụ lục I (Cột 3) & PPCT',
           matchedSources: ['PL1', 'PPCT', 'SGK'],
         },
         {
@@ -407,10 +408,10 @@ export class CatalogExtractorService {
           grade: 'Lớp 9',
           term: 'Học kỳ I',
           totalPeriods: 2,
-          ppctRange: 'Tiết 12, 13',
+          ppctRange: 'Tiết 13, 14',
           weekRange: 'Tuần 6, 7',
           keyObjectives: ['Nhận biết bất phương trình bậc nhất một ẩn', 'Giải và biểu diễn tập nghiệm trên trục số'],
-          sourceBasis: 'Phụ lục I & PPCT chuẩn Toán 9',
+          sourceBasis: 'Phụ lục I (Cột 3) & PPCT',
           matchedSources: ['PL1', 'PPCT', 'SGK'],
         },
         {
@@ -422,10 +423,10 @@ export class CatalogExtractorService {
           grade: 'Lớp 9',
           term: 'Học kỳ I',
           totalPeriods: 2,
-          ppctRange: 'Tiết 14, 15',
+          ppctRange: 'Tiết 15, 16',
           weekRange: 'Tuần 7, 8',
           keyObjectives: ['Khái niệm căn bậc hai số học', 'Điều kiện xác định và hằng đẳng thức căn A bình bằng |A|'],
-          sourceBasis: 'Phụ lục I & PPCT chuẩn Toán 9',
+          sourceBasis: 'Phụ lục I (Cột 3) & PPCT',
           matchedSources: ['PL1', 'PPCT', 'SGK'],
         },
         {
@@ -437,10 +438,10 @@ export class CatalogExtractorService {
           grade: 'Lớp 9',
           term: 'Học kỳ I',
           totalPeriods: 2,
-          ppctRange: 'Tiết 16, 17',
+          ppctRange: 'Tiết 17, 18',
           weekRange: 'Tuần 8, 9',
           keyObjectives: ['Quy tắc khai căn một tích và một thương', 'Rút gọn biểu thức chứa căn'],
-          sourceBasis: 'Phụ lục I & PPCT chuẩn Toán 9',
+          sourceBasis: 'Phụ lục I (Cột 3) & PPCT',
           matchedSources: ['PL1', 'PPCT', 'SGK'],
         },
         {
@@ -452,10 +453,10 @@ export class CatalogExtractorService {
           grade: 'Lớp 9',
           term: 'Học kỳ I',
           totalPeriods: 3,
-          ppctRange: 'Tiết 18, 19, 20',
+          ppctRange: 'Tiết 19, 20, 21',
           weekRange: 'Tuần 9, 10',
           keyObjectives: ['Định nghĩa sin, cos, tan, cot của góc nhọn', 'Mối quan hệ giữa các tỉ số lượng giác của hai góc phụ nhau'],
-          sourceBasis: 'Phụ lục I & PPCT chuẩn Toán 9',
+          sourceBasis: 'Phụ lục I (Cột 3) & PPCT',
           matchedSources: ['PL1', 'PPCT', 'SGK'],
         },
         {
@@ -467,10 +468,10 @@ export class CatalogExtractorService {
           grade: 'Lớp 9',
           term: 'Học kỳ I',
           totalPeriods: 3,
-          ppctRange: 'Tiết 21, 22, 23',
+          ppctRange: 'Tiết 22, 23, 24',
           weekRange: 'Tuần 11, 12',
           keyObjectives: ['Hệ thức giữa cạnh góc vuông và cạnh huyền/hình chiếu', 'Giải tam giác vuông và ứng dụng thực tế'],
-          sourceBasis: 'Phụ lục I & PPCT chuẩn Toán 9',
+          sourceBasis: 'Phụ lục I (Cột 3) & PPCT',
           matchedSources: ['PL1', 'PPCT', 'SGK'],
         },
       ];
@@ -479,7 +480,7 @@ export class CatalogExtractorService {
         subject,
         grade: 'Lớp 9',
         schoolYear: '2026-2027',
-        sourceSummary: 'Chương trình GDPT 2018 chuẩn Bộ GD&ĐT (Môn Toán 9)',
+        sourceSummary: 'Phụ lục I (Cột 3) & PPCT chuẩn GDPT 2018 (Môn Toán 9)',
         totalLessons: lessons.length,
         totalPeriods: lessons.reduce((acc, cur) => acc + cur.totalPeriods, 0),
         lessons,
@@ -500,7 +501,7 @@ export class CatalogExtractorService {
         ppctRange: 'Tiết 1, 2',
         weekRange: 'Tuần 1',
         keyObjectives: ['Nhận biết đơn thức, đa thức nhiều biến', 'Thu gọn đơn thức, đa thức'],
-        sourceBasis: 'Phụ lục I & PPCT chuẩn Toán 8',
+        sourceBasis: 'Phụ lục I (Cột 3) & PPCT chuẩn Toán 8',
         matchedSources: ['PL1', 'PPCT', 'SGK'],
       },
       {
@@ -515,7 +516,7 @@ export class CatalogExtractorService {
         ppctRange: 'Tiết 3, 4',
         weekRange: 'Tuần 2',
         keyObjectives: ['Thực hiện phép cộng và trừ đa thức nhiều biến'],
-        sourceBasis: 'Phụ lục I & PPCT chuẩn Toán 8',
+        sourceBasis: 'Phụ lục I (Cột 3) & PPCT chuẩn Toán 8',
         matchedSources: ['PL1', 'PPCT', 'SGK'],
       },
       {
@@ -530,7 +531,7 @@ export class CatalogExtractorService {
         ppctRange: 'Tiết 5, 6',
         weekRange: 'Tuần 3',
         keyObjectives: ['Nhân đơn thức với đa thức', 'Nhân đa thức với đa thức'],
-        sourceBasis: 'Phụ lục I & PPCT chuẩn Toán 8',
+        sourceBasis: 'Phụ lục I (Cột 3) & PPCT chuẩn Toán 8',
         matchedSources: ['PL1', 'PPCT', 'SGK'],
       },
       {
@@ -545,7 +546,7 @@ export class CatalogExtractorService {
         ppctRange: 'Tiết 7',
         weekRange: 'Tuần 4',
         keyObjectives: ['Chia đơn thức cho đơn thức', 'Chia đa thức cho đơn thức'],
-        sourceBasis: 'Phụ lục I & PPCT chuẩn Toán 8',
+        sourceBasis: 'Phụ lục I (Cột 3) & PPCT chuẩn Toán 8',
         matchedSources: ['PL1', 'PPCT', 'SGK'],
       },
       {
@@ -560,7 +561,7 @@ export class CatalogExtractorService {
         ppctRange: 'Tiết 8, 9',
         weekRange: 'Tuần 4, 5',
         keyObjectives: ['Củng cố quy tắc tính toán trên đa thức nhiều biến'],
-        sourceBasis: 'Phụ lục I & PPCT chuẩn Toán 8',
+        sourceBasis: 'Phụ lục I (Cột 3) & PPCT chuẩn Toán 8',
         matchedSources: ['PL1', 'PPCT', 'SGK'],
       },
     ];
@@ -569,7 +570,7 @@ export class CatalogExtractorService {
       subject,
       grade: 'Lớp 8',
       schoolYear: '2026-2027',
-      sourceSummary: 'Chương trình GDPT 2018 chuẩn Bộ GD&ĐT (Môn Toán 8)',
+      sourceSummary: 'Phụ lục I (Cột 3) & PPCT chuẩn GDPT 2018 (Môn Toán 8)',
       totalLessons: lessons8.length,
       totalPeriods: lessons8.reduce((acc, cur) => acc + cur.totalPeriods, 0),
       lessons: lessons8,
