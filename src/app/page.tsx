@@ -655,7 +655,11 @@ export default function Home() {
       if (!res.ok || !data.success) {
         throw new Error(data.message || 'Lỗi khi tải tài liệu');
       }
+
       await fetchDocuments(wsId);
+      // Tự động kích hoạt trích xuất lại danh mục từ tài liệu nguồn mới tải lên
+      handleExtractCatalog(true, selectedGrade);
+
     } catch (err: unknown) {
       const msg = (err as Error)?.message || 'Lỗi tải tệp';
       setError(msg);
@@ -1934,15 +1938,137 @@ export default function Home() {
           </div>
         )}
 
+
         {!docLoading && documents.length === 0 && (
-          <div className="p-8 text-center bg-slate-50/50 border-2 border-dashed border-slate-200 rounded-xl space-y-3">
-            <span className="text-3xl">📂</span>
-            <p className="font-semibold text-sm text-slate-700">Chưa có tài liệu nguồn.</p>
-            <p className="text-xs text-slate-500 max-w-md mx-auto">
-              Nhấn các nút phía trên hoặc kéo thả tệp (.pdf, .docx, .xlsx, .txt, .md) vào đây để nạp tài liệu làm căn cứ biên soạn.
-            </p>
+          <div className="space-y-4">
+            {/* Standard Pipeline Process Banner */}
+            <div className="p-4 bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 border border-blue-200 rounded-2xl space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-black text-blue-900 uppercase tracking-wide">
+                  🎯 QUY TRÌNH CHUẨN TRÍCH XUẤT TỪ DỮ LIỆU NGUỒN TẢI LÊN:
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 text-xs">
+                <div className="p-2.5 bg-white rounded-xl border border-blue-100 shadow-2xs space-y-1">
+                  <div className="font-bold text-blue-800 flex items-center gap-1">
+                    <span>1️⃣</span> Nạp Phụ lục I &amp; PPCT
+                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    Bấm các nút phía trên hoặc kéo thả tệp .docx/.pdf vào các ô dưới.
+                  </p>
+                </div>
+                <div className="p-2.5 bg-white rounded-xl border border-blue-100 shadow-2xs space-y-1">
+                  <div className="font-bold text-indigo-800 flex items-center gap-1">
+                    <span>2️⃣</span> Giải nén Bảng biểu XML
+                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    Hệ thống đọc chuẩn Cột 1 (STT), Cột 2 (Tên bài), Cột 3 (Số tiết), Cột 4 (PPCT).
+                  </p>
+                </div>
+                <div className="p-2.5 bg-white rounded-xl border border-blue-100 shadow-2xs space-y-1">
+                  <div className="font-bold text-purple-800 flex items-center gap-1">
+                    <span>3️⃣</span> Trích xuất 100% tệp nạp
+                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    Lập bảng Danh mục bài học chính xác từ tệp, tuyệt đối không dùng dữ liệu mẫu.
+                  </p>
+                </div>
+                <div className="p-2.5 bg-white rounded-xl border border-blue-100 shadow-2xs space-y-1">
+                  <div className="font-bold text-emerald-800 flex items-center gap-1">
+                    <span>4️⃣</span> Soạn KHDH 1-Chạm
+                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    Bấm chọn bất kỳ bài học nào trên bảng để tạo KHDH V11-2 ngay lập tức.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* 4 Quick Upload Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <button
+                type="button"
+                onClick={() => handleTriggerUpload('PL1')}
+                className="p-4 bg-amber-50/70 hover:bg-amber-100/90 border-2 border-dashed border-amber-300 hover:border-amber-500 rounded-2xl text-left transition-all group flex flex-col justify-between space-y-2 cursor-pointer"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-2xl">⭐</span>
+                  <span className="text-[10px] font-black bg-amber-200 text-amber-900 px-2 py-0.5 rounded-md">ƯU TIÊN 1</span>
+                </div>
+                <div>
+                  <div className="font-bold text-xs text-amber-950 group-hover:text-amber-900">
+                    + Bổ sung Phụ lục I
+                  </div>
+                  <p className="text-[11px] text-amber-800/80 mt-0.5 leading-snug">
+                    Tệp .docx/.pdf: Quyết định Tên bài, Cột 3 (Số tiết) &amp; YCCĐ.
+                  </p>
+                </div>
+                <span className="text-[10px] font-bold text-amber-700 underline">Bấm để chọn tệp...</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleTriggerUpload('PPCT')}
+                className="p-4 bg-blue-50/70 hover:bg-blue-100/90 border-2 border-dashed border-blue-300 hover:border-blue-500 rounded-2xl text-left transition-all group flex flex-col justify-between space-y-2 cursor-pointer"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-2xl">📘</span>
+                  <span className="text-[10px] font-black bg-blue-200 text-blue-900 px-2 py-0.5 rounded-md">ƯU TIÊN 2</span>
+                </div>
+                <div>
+                  <div className="font-bold text-xs text-blue-950 group-hover:text-blue-900">
+                    + Bổ sung PPCT
+                  </div>
+                  <p className="text-[11px] text-blue-800/80 mt-0.5 leading-snug">
+                    Tệp .docx/.pdf: Quyết định Thứ tự bài, Tiết PPCT &amp; Tuần học.
+                  </p>
+                </div>
+                <span className="text-[10px] font-bold text-blue-700 underline">Bấm để chọn tệp...</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleTriggerUpload('SGK')}
+                className="p-4 bg-emerald-50/70 hover:bg-emerald-100/90 border-2 border-dashed border-emerald-300 hover:border-emerald-500 rounded-2xl text-left transition-all group flex flex-col justify-between space-y-2 cursor-pointer"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-2xl">📗</span>
+                  <span className="text-[10px] font-black bg-emerald-200 text-emerald-900 px-2 py-0.5 rounded-md">ƯU TIÊN 3</span>
+                </div>
+                <div>
+                  <div className="font-bold text-xs text-emerald-950 group-hover:text-emerald-900">
+                    + Bổ sung SGK_
+                  </div>
+                  <p className="text-[11px] text-emerald-800/80 mt-0.5 leading-snug">
+                    Sách giáo khoa: Khái niệm, định nghĩa, công thức &amp; bài tập chuẩn.
+                  </p>
+                </div>
+                <span className="text-[10px] font-bold text-emerald-700 underline">Bấm để chọn tệp...</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleTriggerUpload('KHDH_OLD')}
+                className="p-4 bg-purple-50/70 hover:bg-purple-100/90 border-2 border-dashed border-purple-300 hover:border-purple-500 rounded-2xl text-left transition-all group flex flex-col justify-between space-y-2 cursor-pointer"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-2xl">📙</span>
+                  <span className="text-[10px] font-black bg-purple-200 text-purple-900 px-2 py-0.5 rounded-md">THAM KHẢO</span>
+                </div>
+                <div>
+                  <div className="font-bold text-xs text-purple-950 group-hover:text-purple-900">
+                    + Bổ sung KHDH cũ
+                  </div>
+                  <p className="text-[11px] text-purple-800/80 mt-0.5 leading-snug">
+                    Giáo án cũ: Tham khảo ý tưởng hoạt động, không ghi đè nguồn mới.
+                  </p>
+                </div>
+                <span className="text-[10px] font-bold text-purple-700 underline">Bấm để chọn tệp...</span>
+              </button>
+            </div>
           </div>
         )}
+
 
         {!docLoading && documents.length > 0 && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[360px] overflow-y-auto pr-1">
