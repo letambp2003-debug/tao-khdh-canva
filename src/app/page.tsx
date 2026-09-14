@@ -1136,11 +1136,29 @@ export default function Home() {
       }
 
       // XỬ LÝ SOẠN ĐƠN LẺ / TÁCH TIẾT / CÁC LỆNH KHÁC
-      setPipelineStep(
-        activeMode === 'CONTINUOUS_4SECTION'
-          ? 'Đang soạn KHDH V11 (4 phần A-B-C-D liền mạch, bảng 2 cột chuẩn)...'
-          : 'Đang soạn KHDH Tách tiết (Phân theo từng Tiết PPCT, chuẩn CV 5512)...'
+      const effectiveStageParam = (
+        activeCmd === 'SOAN_PHAN_A' ? 'STAGE_1_MUC_TIEU_KHOI_DONG' :
+        activeCmd === 'SOAN_PHAN_B' ? 'STAGE_2_HINH_THANH_KT' :
+        activeCmd === 'SOAN_PHAN_C' ? 'STAGE_3_LUYEN_TAP' :
+        activeCmd === 'SOAN_PHAN_D' ? 'STAGE_4_VAN_DUNG_HUONG_DAN' :
+        undefined
       );
+
+      if (activeCmd === 'SOAN_PHAN_A') {
+        setPipelineStep('Đang soạn Giai đoạn 1: Phần đầu, Mục tiêu & Hoạt động Khởi động (Phần A)...');
+      } else if (activeCmd === 'SOAN_PHAN_B') {
+        setPipelineStep('Đang soạn Giai đoạn 2: Hình thành kiến thức mới & TikZ (Phần B)...');
+      } else if (activeCmd === 'SOAN_PHAN_C') {
+        setPipelineStep('Đang soạn Giai đoạn 3: Luyện tập phân hóa & Bảng 2 cột (Phần C)...');
+      } else if (activeCmd === 'SOAN_PHAN_D') {
+        setPipelineStep('Đang soạn Giai đoạn 4: Vận dụng thực tế & Hướng dẫn về nhà (Phần D)...');
+      } else {
+        setPipelineStep(
+          activeMode === 'CONTINUOUS_4SECTION'
+            ? 'Đang soạn KHDH V11 (4 phần A-B-C-D liền mạch, bảng 2 cột chuẩn)...'
+            : 'Đang soạn KHDH Tách tiết (Phân theo từng Tiết PPCT, chuẩn CV 5512)...'
+        );
+      }
 
       const res = await fetch('/api/generate-khdh', {
         method: 'POST',
@@ -1148,6 +1166,7 @@ export default function Home() {
         body: JSON.stringify({
           command: activeCmd,
           formatMode: activeMode,
+          sectionStage: effectiveStageParam,
           lessonCode: targetConfig?.lessonTitle || activeLessonCode,
           jobId,
           apiKeys: activeKeys,
