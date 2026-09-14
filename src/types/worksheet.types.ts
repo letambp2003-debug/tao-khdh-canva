@@ -37,6 +37,8 @@ export interface WorksheetData {
     criteria: string;
     levels: string[];
   }[];
+  imagePromptA4?: string;
+  imagePromptA4Vi?: string;
   markdownContent: string; // Toàn bộ nội dung dạng Markdown
 }
 
@@ -55,6 +57,8 @@ export interface GenerateWorksheetResponse {
   success: boolean;
   worksheet?: WorksheetData;
   markdown?: string;
+  imagePromptA4?: string;
+  imagePromptA4Vi?: string;
   message?: string;
   keyUsed?: string;
   tokenUsage?: {

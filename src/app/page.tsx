@@ -139,6 +139,8 @@ export default function Home() {
   const [extractingCatalog, setExtractingCatalog] = useState(false);
   const [catalogSearchQuery, setCatalogSearchQuery] = useState('');
   const [catalogTermFilter, setCatalogTermFilter] = useState<'ALL' | 'Học kỳ I' | 'Học kỳ II'>('ALL');
+  const [savedCatalogSuccess, setSavedCatalogSuccess] = useState(false);
+  const [selectedCatalogLessonCode, setSelectedCatalogLessonCode] = useState('');
 
   // Multi-Key State
   const [showSettings, setShowSettings] = useState(false);
@@ -183,6 +185,14 @@ export default function Home() {
     if (savedClientId) {
       setGoogleClientId(savedClientId);
     }
+
+    try {
+      const savedCat = localStorage.getItem('khdh_stored_catalog_v1');
+      if (savedCat) {
+        const parsedCat = JSON.parse(savedCat);
+        setCatalogData(parsedCat);
+      }
+    } catch {}
   }, []);
 
   // Fetch documents whenever the authenticated user changes
@@ -602,6 +612,9 @@ export default function Home() {
       }
 
       setCatalogData(data.catalog);
+      try {
+        localStorage.setItem('khdh_stored_catalog_v1', JSON.stringify(data.catalog));
+      } catch {}
       setShowCatalogModal(true);
     } catch (err: unknown) {
       const msg = (err as Error)?.message || 'Lỗi khi trích xuất danh mục bài học.';
@@ -611,19 +624,40 @@ export default function Home() {
     }
   };
 
+  const handleSaveCatalog = () => {
+    if (!catalogData) return;
+    try {
+      localStorage.setItem('khdh_stored_catalog_v1', JSON.stringify(catalogData));
+      setSavedCatalogSuccess(true);
+      setTimeout(() => setSavedCatalogSuccess(false), 3000);
+    } catch (e) {
+      console.error('Error saving catalog:', e);
+    }
+  };
+
   const handleSelectCatalogLesson = (
     lesson: CatalogLessonItem,
-    autoSubmitMode?: 'CONTINUOUS_4SECTION' | 'SPLIT_PERIODS'
+    autoAction?: 'CONTINUOUS_4SECTION' | 'SPLIT_PERIODS' | 'ANALYZE' | 'WORKSHEET'
   ) => {
-    const code = lesson.lessonCode || lesson.lessonTitle;
+    const code = lesson.lessonCode
+      ? `${lesson.lessonCode} (${lesson.lessonTitle} - ${lesson.totalPeriods} tiết)`
+      : lesson.lessonTitle;
     setLessonCode(code);
+    setSelectedCatalogLessonCode(lesson.lessonCode);
     setShowCatalogModal(false);
 
-    if (autoSubmitMode) {
-      setKhdhFormatMode(autoSubmitMode);
-      const cmd = autoSubmitMode === 'CONTINUOUS_4SECTION' ? 'SOAN_V11_KHONG_TACH_TIET' : 'SOAN_XUAT';
+    if (autoAction === 'CONTINUOUS_4SECTION') {
+      setKhdhFormatMode('CONTINUOUS_4SECTION');
+      const cmd = 'SOAN_V11_KHONG_TACH_TIET';
       setCommand(cmd);
-      handleSubmit(undefined, undefined, cmd, autoSubmitMode);
+      handleSubmit(undefined, undefined, cmd, 'CONTINUOUS_4SECTION', code);
+    } else if (autoAction === 'SPLIT_PERIODS') {
+      setKhdhFormatMode('SPLIT_PERIODS');
+      const cmd = 'SOAN_XUAT';
+      setCommand(cmd);
+      handleSubmit(undefined, undefined, cmd, 'SPLIT_PERIODS', code);
+    } else if (autoAction === 'ANALYZE') {
+      handleAnalyzeLesson(code);
     }
   };
 
@@ -656,8 +690,9 @@ export default function Home() {
     URL.revokeObjectURL(url);
   };
 
-  const handleAnalyzeLesson = async () => {
-    if (!lessonCode.trim()) {
+  const handleAnalyzeLesson = async (overrideCode?: string | React.SyntheticEvent) => {
+    const targetCode = (typeof overrideCode === 'string' && overrideCode ? overrideCode : lessonCode).trim();
+    if (!targetCode) {
       setError('Vui lòng nhập Mã bài học hoặc Tên bài cần phân tích.');
       return;
     }
@@ -674,7 +709,7 @@ export default function Home() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          lessonCode: lessonCode.trim(),
+          lessonCode: targetCode,
           command: command.trim(),
           apiKeys: activeKeys,
           documentIds: activeDocIds,
@@ -720,13 +755,15 @@ export default function Home() {
     e?: React.FormEvent,
     configOverride?: LessonRequirementAnalysis,
     overrideCommand?: string,
-    overrideMode?: 'SPLIT_PERIODS' | 'CONTINUOUS_4SECTION'
+    overrideMode?: 'SPLIT_PERIODS' | 'CONTINUOUS_4SECTION',
+    overrideLessonCode?: string
   ) => {
     if (e) e.preventDefault();
     if (loading) return;
 
     const activeCmd = (overrideCommand || command).trim();
     const activeMode = overrideMode || khdhFormatMode;
+    const activeLessonCode = (overrideLessonCode || lessonCode).trim();
 
     if (!activeCmd) {
       setError('Vui lòng chọn hoặc nhập Lệnh (Command).');
@@ -1820,6 +1857,93 @@ export default function Home() {
               />
             </div>
 
+            {/* Saved Catalog Quick Picker Card */}
+            {catalogData && catalogData.lessons && catalogData.lessons.length > 0 && (
+              <div className="p-3.5 bg-gradient-to-br from-blue-50/90 to-indigo-50/70 border border-blue-200 rounded-xl space-y-2.5 shadow-2xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black text-blue-950 flex items-center gap-1.5">
+                    <span>📚</span> Danh Mục Bài Học Đã Lưu ({catalogData.lessons.length} bài)
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowCatalogModal(true)}
+                    className="text-[11px] text-blue-700 hover:text-blue-900 font-bold bg-white px-2 py-0.5 rounded-md border border-blue-200 shadow-2xs hover:bg-blue-50 transition-all flex items-center gap-1"
+                  >
+                    <span>📊</span> Xem Ma Trận
+                  </button>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label htmlFor="catalog-quick-select" className="block text-[11px] font-semibold text-slate-700">
+                    Chọn nhanh bài học để thực thi 1-chạm:
+                  </label>
+                  <select
+                    id="catalog-quick-select"
+                    value={selectedCatalogLessonCode || ''}
+                    onChange={(e) => {
+                      const selCode = e.target.value;
+                      setSelectedCatalogLessonCode(selCode);
+                      const lesson = catalogData.lessons.find((l) => l.lessonCode === selCode);
+                      if (lesson) {
+                        const formatted = `${lesson.lessonCode} (${lesson.lessonTitle} - ${lesson.totalPeriods} tiết)`;
+                        setLessonCode(formatted);
+                      }
+                    }}
+                    className="w-full bg-white border border-blue-300 text-slate-900 text-xs font-medium rounded-lg px-2.5 py-1.5 focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
+                  >
+                    <option value="">-- Bấm chọn bài học từ danh mục --</option>
+                    {catalogData.lessons.map((l, idx) => (
+                      <option key={idx} value={l.lessonCode}>
+                        [STT {l.stt || idx + 1}] {l.lessonTitle} ({l.totalPeriods}t - {l.ppctRange || `Tiết ${l.stt || idx + 1}`})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 3 Direct 1-Click Action Buttons for Selected Lesson */}
+                <div className="grid grid-cols-3 gap-1.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const lesson = catalogData.lessons.find((l) => l.lessonCode === selectedCatalogLessonCode) || catalogData.lessons[0];
+                      if (lesson) handleSelectCatalogLesson(lesson, 'CONTINUOUS_4SECTION');
+                    }}
+                    disabled={loading}
+                    title="Soạn KHDH V11-2 4 phần không tách tiết chuẩn 100%"
+                    className="py-1.5 px-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold shadow-2xs transition-all flex items-center justify-center gap-1"
+                  >
+                    <span>⚡</span> V11-2 (4 phần)
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const lesson = catalogData.lessons.find((l) => l.lessonCode === selectedCatalogLessonCode) || catalogData.lessons[0];
+                      if (lesson) handleSelectCatalogLesson(lesson, 'SPLIT_PERIODS');
+                    }}
+                    disabled={loading}
+                    title="Soạn KHDH tách tiết chuẩn PPCT"
+                    className="py-1.5 px-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[11px] font-bold shadow-2xs transition-all flex items-center justify-center gap-1"
+                  >
+                    <span>✂️</span> Tách tiết
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const lesson = catalogData.lessons.find((l) => l.lessonCode === selectedCatalogLessonCode) || catalogData.lessons[0];
+                      if (lesson) handleSelectCatalogLesson(lesson, 'ANALYZE');
+                    }}
+                    disabled={analyzingLesson || loading}
+                    title="Phân tích chuyên sâu bài học"
+                    className="py-1.5 px-2 bg-purple-100 hover:bg-purple-200 text-purple-900 border border-purple-300 rounded-lg text-[11px] font-bold shadow-2xs transition-all flex items-center justify-center gap-1"
+                  >
+                    <span>🔍</span> Phân tích
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Lesson Code Input */}
             <div>
               <label htmlFor="lesson-input" className="block text-xs font-semibold text-slate-600 mb-1">
@@ -2209,6 +2333,92 @@ export default function Home() {
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-slate-600 pt-1">
                               <div>Họ và tên học sinh: ................................................................</div>
                               <div>Lớp: 8A.....  Nhóm: ........  Thời gian: 15-20 phút</div>
+                            </div>
+                          </div>
+
+                          {/* Visual AI Image Prompt Box for A4 Portrait Educational Worksheet (8K & Ink-Saving) */}
+                          <div className="p-4 bg-gradient-to-r from-emerald-50 via-teal-50 to-blue-50 border border-emerald-300 rounded-2xl shadow-xs space-y-3">
+                            <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2 border-b border-emerald-200/80 pb-2.5">
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span className="px-2 py-0.5 bg-emerald-700 text-white font-black text-[10px] uppercase tracking-wider rounded-md">
+                                    KHỔ A4 DỌC • 8K UHD • TIẾT KIỆM MỰC IN
+                                  </span>
+                                  <h4 className="text-xs font-black text-emerald-950 flex items-center gap-1">
+                                    <span>🎨</span> BỘ PROMPT TẠO ẢNH PHIẾU HỌC TẬP (AI IMAGE GENERATOR)
+                                  </h4>
+                                </div>
+                                <p className="text-[11px] text-emerald-800 mt-0.5">
+                                  Mã prompt chuyên biệt cho Midjourney v6, DALL-E 3, Canva AI, Flux.1 và Imagen 3 — Tối ưu in ấn học đường, không tốn mực, nét chữ và hình vẽ toán học siêu nét.
+                                </p>
+                              </div>
+
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="bg-white/80 text-emerald-900 border border-emerald-200 text-[10px] font-bold px-2 py-0.5 rounded-md">
+                                  📐 Khổ: 9:16 (A4 Dọc)
+                                </span>
+                                <span className="bg-white/80 text-teal-900 border border-teal-200 text-[10px] font-bold px-2 py-0.5 rounded-md">
+                                  🌱 Nền trắng Eco
+                                </span>
+                                <span className="bg-white/80 text-blue-900 border border-blue-200 text-[10px] font-bold px-2 py-0.5 rounded-md">
+                                  ✨ 8K Vector
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* 2 Dedicated Prompt Cards */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              {/* 1. English Prompt (Midjourney / DALL-E / Flux / Imagen 3) */}
+                              <div className="rounded-xl overflow-hidden border border-slate-800 bg-slate-950 text-slate-100 flex flex-col justify-between">
+                                <div className="px-3 py-2 bg-slate-900 border-b border-slate-800 flex items-center justify-between">
+                                  <span className="text-[11px] font-bold text-sky-400 flex items-center gap-1.5">
+                                    <span>🇬🇧</span> Midjourney v6 / DALL-E 3 / Flux.1:
+                                  </span>
+                                  <button
+                                    onClick={() => {
+                                      const promptEn = `A clean, minimalist print-ready Vietnamese educational student worksheet design on a vertical A4 portrait format (aspect ratio 9:16). Top header: 'TRƯỜNG THCS QUANG TRUNG | TỔ TOÁN TIN', student information box (Họ và tên, Lớp, Ngày, Nhóm). Header Title: 'PHIẾU HỌC TẬP: ${(outputData?.lesson_code || 'BÀI HỌC').toUpperCase()}' in navy blue (#0F4C81). Box 1: Core Knowledge Summary with clean icons. Box 2: 3-tier differentiated practice problems with dotted lines for student written answers and 2D vector geometry diagrams. Footer: Self-evaluation rubric stars and teacher signature. Style: Eco-friendly ink-saving print layout, pure white background (#FFFFFF), sharp Vietnamese typography, 8K UHD resolution, 300 DPI print quality --ar 9:16 --v 6.1 --style raw`;
+                                      handleCopySnippet(promptEn, 'worksheet_prompt_en');
+                                    }}
+                                    className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all flex items-center gap-1 ${
+                                      copiedTarget === 'worksheet_prompt_en'
+                                        ? 'bg-emerald-600 text-white'
+                                        : 'bg-slate-800 hover:bg-slate-700 text-sky-300 border border-slate-700'
+                                    }`}
+                                  >
+                                    <span>{copiedTarget === 'worksheet_prompt_en' ? '✓' : '📋'}</span>
+                                    <span>{copiedTarget === 'worksheet_prompt_en' ? 'Đã copy!' : 'Copy Prompt EN'}</span>
+                                  </button>
+                                </div>
+                                <div className="p-2.5 font-mono text-[11px] text-sky-300 leading-relaxed max-h-32 overflow-y-auto select-all">
+                                  A clean, minimalist print-ready Vietnamese educational student worksheet design on a vertical A4 portrait format (aspect ratio 9:16). Top header: &apos;TRƯỜNG THCS QUANG TRUNG | TỔ TOÁN TIN&apos;, student info box. Header Title: &apos;PHIẾU HỌC TẬP: {(outputData?.lesson_code || 'BÀI HỌC').toUpperCase()}&apos; in navy blue (#0F4C81). 3-tier differentiated practice problems with dotted lines and 2D vector geometry. Eco-friendly ink-saving print layout, pure white background, sharp typography, 8K UHD, 300 DPI --ar 9:16 --v 6.1 --style raw
+                                </div>
+                              </div>
+
+                              {/* 2. Vietnamese Prompt (Canva AI / ChatGPT / Bing Creator) */}
+                              <div className="rounded-xl overflow-hidden border border-emerald-300 bg-white flex flex-col justify-between">
+                                <div className="px-3 py-2 bg-emerald-100/70 border-b border-emerald-200 flex items-center justify-between">
+                                  <span className="text-[11px] font-bold text-emerald-950 flex items-center gap-1.5">
+                                    <span>🇻🇳</span> Canva AI / ChatGPT DALL-E / Bing Creator:
+                                  </span>
+                                  <button
+                                    onClick={() => {
+                                      const promptVi = `Thiết kế mẫu phiếu học tập học sinh khổ A4 dọc chuẩn sư phạm cho bài học '${outputData?.lesson_code || 'Toán học'}'. Bố cục gồm: Tiêu đề trường 'TRƯỜNG THCS QUANG TRUNG - TỔ TOÁN TIN', khung điền thông tin học sinh (Họ tên, Lớp, Ngày). Tiêu đề lớn in đậm: 'PHIẾU HỌC TẬP: ${(outputData?.lesson_code || 'BÀI HỌC').toUpperCase()}'. Khung tóm tắt Kiến thức trọng tâm; Hệ thống bài tập phân hóa 3 mức độ (Nhận biết, Vận dụng, Vận dụng cao) có các dòng kẻ chấm chấm để học sinh ghi lời giải; Góc tự đánh giá Rubric và chữ ký giáo viên. Phong cách tối giản, nền trắng tiết kiệm mực in, hình vẽ sắc nét 8K, chuẩn tiếng Việt.`;
+                                      handleCopySnippet(promptVi, 'worksheet_prompt_vi');
+                                    }}
+                                    className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all flex items-center gap-1 ${
+                                      copiedTarget === 'worksheet_prompt_vi'
+                                        ? 'bg-emerald-600 text-white'
+                                        : 'bg-emerald-50 hover:bg-emerald-200 text-emerald-900 border border-emerald-300'
+                                    }`}
+                                  >
+                                    <span>{copiedTarget === 'worksheet_prompt_vi' ? '✓' : '📋'}</span>
+                                    <span>{copiedTarget === 'worksheet_prompt_vi' ? 'Đã copy!' : 'Copy Prompt VI'}</span>
+                                  </button>
+                                </div>
+                                <div className="p-2.5 font-mono text-[11px] text-emerald-950 leading-relaxed max-h-32 overflow-y-auto select-all">
+                                  Thiết kế mẫu phiếu học tập học sinh khổ A4 dọc chuẩn sư phạm cho bài học &apos;{outputData?.lesson_code || 'Toán học'}&apos;. Bố cục gồm: Tiêu đề trường học &apos;TRƯỜNG THCS QUANG TRUNG - TỔ TOÁN TIN&apos;, khung điền thông tin học sinh, tiêu đề lớn &apos;PHIẾU HỌC TẬP&apos;, khung tóm tắt kiến thức trọng tâm, bài tập phân hóa 3 mức độ có dòng kẻ chấm làm bài, góc tự đánh giá rubric. Nền trắng tinh khôi tiết kiệm mực in, độ nét 8K, chuẩn tiếng Việt.
+                                </div>
+                              </div>
                             </div>
                           </div>
 
