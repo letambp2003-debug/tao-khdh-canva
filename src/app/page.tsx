@@ -1208,7 +1208,10 @@ export default function Home() {
     mathMode: 'omml' | 'latex' = 'omml',
     printProfile: 'COMPACT_PRINT' | 'STANDARD' = 'COMPACT_PRINT'
   ) => {
-    if (!outputData?.khdh_draft) return;
+    if (!outputData?.khdh_draft) {
+      alert('Chưa có nội dung KHDH để xuất file Word.');
+      return;
+    }
 
     setExportingWord(true);
     try {
@@ -1247,22 +1250,37 @@ export default function Home() {
       const contentDisposition = res.headers.get('Content-Disposition') || '';
       let filename = `TIET_${outputData.lesson_code ? outputData.lesson_code.replace(/[^a-zA-Z0-9]/g, '_') : '1_2_BAI_HOC'}.docx`;
       
-      const match = contentDisposition.match(/filename="?([^"]+)"?/);
+      const match = contentDisposition.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
       if (match && match[1]) {
-        filename = decodeURIComponent(match[1]);
+        try {
+          filename = decodeURIComponent(match[1]);
+        } catch {
+          filename = match[1];
+        }
       }
 
       const url = URL.createObjectURL(docxBlob);
       const a = document.createElement('a');
+      a.style.display = 'none';
       a.href = url;
       a.download = filename;
       document.body.appendChild(a);
       a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+
+      // Dọn dẹp URL Blob sau 3 giây để tránh lỗi ngắt kết nối tải ở lần xuất thứ 2
+      setTimeout(() => {
+        try {
+          if (document.body.contains(a)) {
+            document.body.removeChild(a);
+          }
+          URL.revokeObjectURL(url);
+        } catch {}
+      }, 3000);
+
     } catch (err: unknown) {
       const msg = (err as Error)?.message || 'Không thể tạo file Word. Vui lòng thử lại.';
       setError(msg);
+      alert('Lỗi xuất file Word: ' + msg);
     } finally {
       setExportingWord(false);
     }

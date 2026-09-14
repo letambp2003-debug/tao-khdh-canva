@@ -559,7 +559,7 @@ export class DocxBuilder {
         flushTable();
       }
 
-      if (!line) {
+      if (!line || line === '---' || /^[-*_]{3,}$/.test(line)) {
         continue;
       }
 
