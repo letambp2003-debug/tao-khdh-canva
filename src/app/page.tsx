@@ -2589,37 +2589,139 @@ export default function Home() {
               )}
             </div>
 
-            {/* 2 Nút Lệnh Tạo KHDH Chuyên Biệt */}
-            <div className="pt-2 space-y-2.5">
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
-                Thực thi tạo KHDH theo yêu cầu:
-              </label>
+            {/* TRUNG TÂM NÚT LỆNH THỰC THI SOẠN KHDH CHUYÊN NGHIỆP */}
+            <div className="pt-2 space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                  <span>⚡</span> Trung tâm thực thi KHDH (1-Chạm):
+                </label>
+                <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full">
+                  Chuẩn CV 5512
+                </span>
+              </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {/* Nút 1: Tách Tiết */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setKhdhFormatMode('SPLIT_PERIODS');
-                    setCommand('SOAN_XUAT');
-                    handleSubmit(undefined, undefined, 'SOAN_XUAT', 'SPLIT_PERIODS');
-                  }}
-                  disabled={loading}
-                  className={`p-3.5 rounded-xl text-xs font-bold transition-all shadow-sm flex flex-col items-center justify-center text-center gap-1 border ${
-                    khdhFormatMode === 'SPLIT_PERIODS'
-                      ? 'bg-gradient-to-br from-blue-700 to-indigo-800 text-white border-blue-800 ring-2 ring-blue-400'
-                      : 'bg-white hover:bg-blue-50 text-blue-900 border-blue-300'
-                  }`}
-                >
-                  <div className="flex items-center gap-1.5 text-sm font-black">
-                    <span>✂️</span> (1) Soạn Tách Tiết
-                  </div>
-                  <div className={`text-[10px] ${khdhFormatMode === 'SPLIT_PERIODS' ? 'text-blue-100' : 'text-slate-500'}`}>
-                    Theo từng Tiết [PPCT] (V10.1)
-                  </div>
-                </button>
+              {/* NÚT CHÍNH 1: SOẠN LIÊN HOÀN 4 PHẦN (KHUYÊN DÙNG) */}
+              <button
+                type="button"
+                onClick={() => {
+                  setKhdhFormatMode('CONTINUOUS_4SECTION');
+                  setCommand('SOAN_4_PHAN_LIEN_HOAN');
+                  handleSubmit(undefined, undefined, 'SOAN_4_PHAN_LIEN_HOAN', 'CONTINUOUS_4SECTION');
+                }}
+                disabled={loading}
+                className="w-full p-3.5 bg-gradient-to-r from-indigo-700 via-purple-700 to-pink-700 hover:from-indigo-800 hover:via-purple-800 hover:to-pink-800 text-white rounded-2xl font-bold shadow-md hover:shadow-lg transition-all flex flex-col items-center justify-center text-center gap-1 border border-purple-300 ring-2 ring-purple-300/40 cursor-pointer group"
+              >
+                <div className="flex items-center gap-2 text-sm font-black tracking-tight">
+                  <span className="text-base group-hover:scale-110 transition-transform">✨</span>
+                  <span>(KHUYÊN DÙNG) SOẠN LIÊN HOÀN 4 PHẦN (100% ĐẦY ĐỦ)</span>
+                </div>
+                <div className="text-[11px] text-purple-100 font-medium">
+                  Chạy tuần tự 4 giai đoạn độc lập có ngân sách token riêng — Tuyệt đối không bị cắt ngắn
+                </div>
+              </button>
 
-                {/* Nút 2: Không Tách Tiết V11 */}
+              {/* KHỐI 4 NÚT LỆNH THỰC THI TỪNG PHẦN RIÊNG BIỆT */}
+              <div className="p-3 bg-slate-100/80 border border-slate-200 rounded-2xl space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-700 flex items-center gap-1">
+                    <span>🧩</span> Thực thi soạn riêng từng phần độc lập:
+                  </span>
+                  <span className="text-[10px] text-slate-500 italic">Bấm để chạy ngay</span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  {/* Nút Phần A */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setKhdhFormatMode('CONTINUOUS_4SECTION');
+                      setCommand('SOAN_PHAN_A');
+                      handleSubmit(undefined, undefined, 'SOAN_PHAN_A', 'CONTINUOUS_4SECTION');
+                    }}
+                    disabled={loading}
+                    className="p-2.5 bg-white hover:bg-amber-50 text-amber-950 border border-amber-300 hover:border-amber-400 rounded-xl text-left transition-all shadow-2xs group flex flex-col justify-between space-y-1 cursor-pointer"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-black text-amber-900 group-hover:text-amber-800 flex items-center gap-1">
+                        <span>🚩</span> Phần A: Khởi động
+                      </span>
+                      <span className="text-[9px] font-bold bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded">Giai đoạn 1</span>
+                    </div>
+                    <p className="text-[10px] text-slate-500 line-clamp-1">
+                      Mục tiêu 3 phần + Thiết bị + Mở đầu
+                    </p>
+                  </button>
+
+                  {/* Nút Phần B */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setKhdhFormatMode('CONTINUOUS_4SECTION');
+                      setCommand('SOAN_PHAN_B');
+                      handleSubmit(undefined, undefined, 'SOAN_PHAN_B', 'CONTINUOUS_4SECTION');
+                    }}
+                    disabled={loading}
+                    className="p-2.5 bg-white hover:bg-blue-50 text-blue-950 border border-blue-300 hover:border-blue-400 rounded-xl text-left transition-all shadow-2xs group flex flex-col justify-between space-y-1 cursor-pointer"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-black text-blue-900 group-hover:text-blue-800 flex items-center gap-1">
+                        <span>💡</span> Phần B: Kiến thức mới
+                      </span>
+                      <span className="text-[9px] font-bold bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded">Giai đoạn 2</span>
+                    </div>
+                    <p className="text-[10px] text-slate-500 line-clamp-1">
+                      Hoạt động khám phá + Bảng 2 cột + TikZ
+                    </p>
+                  </button>
+
+                  {/* Nút Phần C */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setKhdhFormatMode('CONTINUOUS_4SECTION');
+                      setCommand('SOAN_PHAN_C');
+                      handleSubmit(undefined, undefined, 'SOAN_PHAN_C', 'CONTINUOUS_4SECTION');
+                    }}
+                    disabled={loading}
+                    className="p-2.5 bg-white hover:bg-emerald-50 text-emerald-950 border border-emerald-300 hover:border-emerald-400 rounded-xl text-left transition-all shadow-2xs group flex flex-col justify-between space-y-1 cursor-pointer"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-black text-emerald-900 group-hover:text-emerald-800 flex items-center gap-1">
+                        <span>📝</span> Phần C: Luyện tập
+                      </span>
+                      <span className="text-[9px] font-bold bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded">Giai đoạn 3</span>
+                    </div>
+                    <p className="text-[10px] text-slate-500 line-clamp-1">
+                      Bài tập trắc nghiệm + Tự luận phân hóa
+                    </p>
+                  </button>
+
+                  {/* Nút Phần D */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setKhdhFormatMode('CONTINUOUS_4SECTION');
+                      setCommand('SOAN_PHAN_D');
+                      handleSubmit(undefined, undefined, 'SOAN_PHAN_D', 'CONTINUOUS_4SECTION');
+                    }}
+                    disabled={loading}
+                    className="p-2.5 bg-white hover:bg-purple-50 text-purple-950 border border-purple-300 hover:border-purple-400 rounded-xl text-left transition-all shadow-2xs group flex flex-col justify-between space-y-1 cursor-pointer"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-black text-purple-900 group-hover:text-purple-800 flex items-center gap-1">
+                        <span>🚀</span> Phần D: Vận dụng
+                      </span>
+                      <span className="text-[9px] font-bold bg-purple-100 text-purple-800 px-1.5 py-0.5 rounded">Giai đoạn 4</span>
+                    </div>
+                    <p className="text-[10px] text-slate-500 line-clamp-1">
+                      Tình huống thực tế + Hướng dẫn về nhà
+                    </p>
+                  </button>
+                </div>
+              </div>
+
+              {/* 2 NÚT SOẠN NHANH TRUYỀN THỐNG */}
+              <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
                   onClick={() => {
@@ -2628,18 +2730,22 @@ export default function Home() {
                     handleSubmit(undefined, undefined, 'SOAN_V11_KHONG_TACH_TIET', 'CONTINUOUS_4SECTION');
                   }}
                   disabled={loading}
-                  className={`p-3.5 rounded-xl text-xs font-bold transition-all shadow-sm flex flex-col items-center justify-center text-center gap-1 border ${
-                    khdhFormatMode === 'CONTINUOUS_4SECTION'
-                      ? 'bg-gradient-to-br from-emerald-700 to-teal-800 text-white border-emerald-800 ring-2 ring-emerald-400'
-                      : 'bg-white hover:bg-emerald-50 text-emerald-900 border-emerald-300'
-                  }`}
+                  className="py-2.5 px-3 bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 rounded-xl text-xs font-bold transition-all shadow-2xs flex items-center justify-center gap-1.5 cursor-pointer"
                 >
-                  <div className="flex items-center gap-1.5 text-sm font-black">
-                    <span>📄</span> (2) Không Tách Tiết
-                  </div>
-                  <div className={`text-[10px] ${khdhFormatMode === 'CONTINUOUS_4SECTION' ? 'text-emerald-100' : 'text-slate-500'}`}>
-                    4 Phần A-B-C-D (V11 FINAL)
-                  </div>
+                  <span>📄</span> Soạn 1 lượt nhanh
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setKhdhFormatMode('SPLIT_PERIODS');
+                    setCommand('SOAN_XUAT');
+                    handleSubmit(undefined, undefined, 'SOAN_XUAT', 'SPLIT_PERIODS');
+                  }}
+                  disabled={loading}
+                  className="py-2.5 px-3 bg-white hover:bg-slate-50 text-blue-800 border border-blue-200 rounded-xl text-xs font-bold transition-all shadow-2xs flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <span>✂️</span> Tách tiết (PPCT)
                 </button>
               </div>
 
