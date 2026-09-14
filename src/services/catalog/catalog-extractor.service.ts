@@ -331,13 +331,21 @@ export class CatalogExtractorService {
 
     // 1. Lấy danh sách tài liệu nguồn sẵn sàng
     let activeDocs = await SourceDocumentService.getActiveReady(targetProject);
+    console.log(`[CATALOG] Project=${targetProject}, ActiveDocs=${activeDocs.length}, RequestDocIds=${JSON.stringify(req.documentIds || 'none')}`);
+    for (const d of activeDocs) {
+      console.log(`  [DOC] id=${d.id} type=${d.documentType} name="${d.displayName}" textLen=${(d.extractedText || '').length}`);
+    }
+    // CHỈ lọc theo documentIds nếu client gửi danh sách THỰC SỰ CÓ GIÁ TRỊ
     if (req.documentIds && Array.isArray(req.documentIds) && req.documentIds.length > 0) {
       activeDocs = activeDocs.filter((d) => req.documentIds?.includes(d.id));
+      console.log(`  [FILTER] After filtering by documentIds: ${activeDocs.length} docs remain`);
     }
+    // Nếu documentIds rỗng hoặc không gửi → dùng TẤT CẢ active docs của project
 
     // 2. Bóc tách dữ liệu bảng từ tệp tải lên
     const { lessons: tableLessons, detectedSubject, detectedGrade, detectedSchoolYear } =
       this.parseLessonsFromSourceTables(activeDocs);
+    console.log(`  [PARSE] TableLessons=${tableLessons.length}, Subject="${detectedSubject}", Grade="${detectedGrade}"`);
 
     const subjectName = req.subject && req.subject !== 'Tài liệu nguồn' ? req.subject : detectedSubject;
     const gradeName = req.grade || detectedGrade;

@@ -676,9 +676,12 @@ export default function Home() {
         throw new Error(data.message || 'Lỗi khi tải tài liệu');
       }
 
+      // Cập nhật danh sách tài liệu trước
       await fetchDocuments(wsId);
-      // Tự động kích hoạt trích xuất lại danh mục từ tài liệu nguồn mới tải lên
-      handleExtractCatalog(true, selectedGrade);
+
+      // Tự động trích xuất danh mục - KHÔNG gửi documentIds để server
+      // tự lấy TẤT CẢ tài liệu active/ready của project (tránh race condition)
+      handleExtractCatalogServerSide(true, selectedGrade);
 
     } catch (err: unknown) {
       const msg = (err as Error)?.message || 'Lỗi tải tệp';
@@ -852,13 +855,13 @@ export default function Home() {
         localStorage.removeItem('khdh_stored_catalog_v1');
       } catch {}
     }
-    handleExtractCatalog(true, newGrade, selectedSubject);
+    handleExtractCatalogServerSide(true, newGrade, selectedSubject);
   };
 
   const handleResetCatalogCache = () => {
     localStorage.removeItem('khdh_stored_catalog_v1');
     setCatalogData(null);
-    handleExtractCatalog(true, selectedGrade);
+    handleExtractCatalogServerSide(true, selectedGrade);
   };
 
   const handleSwitchSubject = (newSubject: string) => {
@@ -867,7 +870,7 @@ export default function Home() {
     try {
       localStorage.removeItem('khdh_stored_catalog_v1');
     } catch {}
-    handleExtractCatalog(true, selectedGrade, newSubject);
+    handleExtractCatalogServerSide(true, selectedGrade, newSubject);
   };
 
   const handleResetAllSystemData = async () => {
@@ -889,6 +892,54 @@ export default function Home() {
     }
   };
 
+  /**
+   * Trích xuất danh mục thuần từ phía server, KHÔNG gửi documentIds
+   * Dùng sau khi upload file mới để tránh race condition với React state
+   */
+  const handleExtractCatalogServerSide = async (
+    forceRefresh: boolean,
+    overrideGrade?: 'Lớp 9' | 'Lớp 8' | 'Lớp 7' | 'Lớp 6',
+    overrideSubject?: string
+  ) => {
+    const targetGrade = overrideGrade || selectedGrade;
+    const targetSubject = overrideSubject || selectedSubject || 'Lịch sử';
+    setExtractingCatalog(true);
+    setError(null);
+    try {
+      const wsId = getUserWorkspaceId(currentUser);
+      const activeKeys = currentParsedKeys.length > 0 ? currentParsedKeys : ApiKeyService.getClientKeys();
+
+      const res = await fetch('/api/extract-catalog', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          grade: targetGrade,
+          subject: targetSubject,
+          apiKeys: activeKeys,
+          // QUAN TRỌNG: KHÔNG gửi documentIds — server tự lấy TẤT CẢ active docs
+          projectId: wsId,
+          forceRefresh: true,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || 'Không thể trích xuất danh mục bài học.');
+      }
+
+      setCatalogData(data.catalog);
+      try {
+        localStorage.setItem('khdh_stored_catalog_v1', JSON.stringify(data.catalog));
+      } catch {}
+      setShowCatalogModal(true);
+    } catch (err: unknown) {
+      const msg = (err as Error)?.message || 'Lỗi khi trích xuất danh mục bài học.';
+      setError(msg);
+    } finally {
+      setExtractingCatalog(false);
+    }
+  };
+
   const handleExtractCatalog = async (
     forceRefresh?: boolean | React.SyntheticEvent,
     overrideGrade?: 'Lớp 9' | 'Lớp 8' | 'Lớp 7' | 'Lớp 6',
@@ -902,19 +953,25 @@ export default function Home() {
     try {
       const wsId = getUserWorkspaceId(currentUser);
       const activeKeys = currentParsedKeys.length > 0 ? currentParsedKeys : ApiKeyService.getClientKeys();
+      // Chỉ gửi documentIds nếu thực sự có docs trong state, nếu rỗng thì KHÔNG gửi
       const activeDocIds = documents.filter((d) => d.isActive && d.status === 'READY').map((d) => d.id);
+
+      const bodyPayload: Record<string, unknown> = {
+        grade: targetGrade,
+        subject: targetSubject,
+        apiKeys: activeKeys,
+        projectId: wsId,
+        forceRefresh: isForce,
+      };
+      // CHỈ gửi documentIds nếu thực sự có giá trị, KHÔNG gửi mảng rỗng
+      if (activeDocIds.length > 0) {
+        bodyPayload.documentIds = activeDocIds;
+      }
 
       const res = await fetch('/api/extract-catalog', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          grade: targetGrade,
-          subject: targetSubject,
-          apiKeys: activeKeys,
-          documentIds: activeDocIds,
-          projectId: wsId,
-          forceRefresh: isForce,
-        }),
+        body: JSON.stringify(bodyPayload),
       });
 
       const data = await res.json();
