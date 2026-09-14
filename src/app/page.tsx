@@ -106,6 +106,7 @@ export default function Home() {
 
   const [command, setCommand] = useState('SOAN_V11_KHONG_TACH_TIET');
   const [khdhFormatMode, setKhdhFormatMode] = useState<'SPLIT_PERIODS' | 'CONTINUOUS_4SECTION'>('CONTINUOUS_4SECTION');
+  const [selectedSubject, setSelectedSubject] = useState<string>('Lịch sử');
   const [selectedGrade, setSelectedGrade] = useState<'Lớp 9' | 'Lớp 8' | 'Lớp 7' | 'Lớp 6'>('Lớp 9');
   const [lessonCode, setLessonCode] = useState('TOAN-9-HKI-SODAISO-C01-STT01');
   const [loading, setLoading] = useState(false);
@@ -601,23 +602,43 @@ export default function Home() {
         setDocuments(data.documents || []);
         setReadiness(data.readiness || null);
 
-        // Tự động nhận diện khối lớp từ tài liệu nạp lên
+        // Tự động nhận diện MÔN HỌC và KHỐI LỚP từ tài liệu nạp lên
         const docText = (data.documents || [])
-          .map((d: SourceDocument) => `${d.displayName} ${d.originalFileName}`)
+          .map((d: SourceDocument) => `${d.displayName} ${d.originalFileName} ${d.contentSummary || ''}`)
           .join(' ')
           .toLowerCase();
 
-        if (/\b(toán\s*9|lớp\s*9|lop\s*9|toan\s*9|-9-|_9_|k9)\b/i.test(docText)) {
+        let detectedSub = selectedSubject;
+        if (/\b(lịch\s*sử|lich\s*su|ls\s*&?\s*đl|sử\s*[6789]|lichsu)\b/i.test(docText)) {
+          detectedSub = 'Lịch sử';
+        } else if (/\b(địa\s*l[íy]|dia\s*li|địa\s*[6789])\b/i.test(docText)) {
+          detectedSub = 'Địa lí';
+        } else if (/\b(ngữ\s*văn|ngu\s*van|văn\s*[6789])\b/i.test(docText)) {
+          detectedSub = 'Ngữ văn';
+        } else if (/\b(khoa\s*học\s*tự\s*nhiên|khtn|vật\s*l[íy]|hóa\s*học|sinh\s*học)\b/i.test(docText)) {
+          detectedSub = 'Khoa học tự nhiên';
+        } else if (/\b(tin\s*học|tin\s*hoc|tin\s*[6789])\b/i.test(docText)) {
+          detectedSub = 'Tin học';
+        } else if (/\b(tiếng\s*anh|english|tienganh)\b/i.test(docText)) {
+          detectedSub = 'Tiếng Anh';
+        } else if (/\b(toán|toan|đại\s*số|hình\s*học)\b/i.test(docText)) {
+          detectedSub = 'Toán học';
+        }
+        setSelectedSubject(detectedSub);
+
+        let detectedG = selectedGrade;
+        if (/\b(lớp\s*9|lop\s*9|k9|khoi\s*9|khối\s*9|-9-|_9_)\b/i.test(docText)) {
+          detectedG = 'Lớp 9';
           setSelectedGrade('Lớp 9');
-          setLessonCode((prev) => (prev.includes('TOAN-8') ? 'TOAN-9-HKI-SODAISO-C01-STT01' : prev));
-        } else if (/\b(toán\s*8|lớp\s*8|lop\s*8|toan\s*8|-8-|_8_|k8)\b/i.test(docText)) {
+        } else if (/\b(lớp\s*8|lop\s*8|k8|khoi\s*8|khối\s*8|-8-|_8_)\b/i.test(docText)) {
+          detectedG = 'Lớp 8';
           setSelectedGrade('Lớp 8');
-        } else if (/\b(toán\s*7|lớp\s*7|lop\s*7|toan\s*7|-7-|_7_|k7)\b/i.test(docText)) {
+        } else if (/\b(lớp\s*7|lop\s*7|k7|khoi\s*7|khối\s*7|-7-|_7_)\b/i.test(docText)) {
+          detectedG = 'Lớp 7';
           setSelectedGrade('Lớp 7');
-          setLessonCode((prev) => (prev.includes('TOAN-8') ? 'TOAN-7-HKI-SODAISO-C01-STT01' : prev));
-        } else if (/\b(toán\s*6|lớp\s*6|lop\s*6|toan\s*6|-6-|_6_|k6)\b/i.test(docText)) {
+        } else if (/\b(lớp\s*6|lop\s*6|k6|khoi\s*6|khối\s*6|-6-|_6_)\b/i.test(docText)) {
+          detectedG = 'Lớp 6';
           setSelectedGrade('Lớp 6');
-          setLessonCode((prev) => (prev.includes('TOAN-8') ? 'TOAN-6-HKI-SODAISO-C01-STT01' : prev));
         }
 
       }
@@ -827,14 +848,17 @@ export default function Home() {
   const handleSwitchGrade = (newGrade: 'Lớp 9' | 'Lớp 8' | 'Lớp 7' | 'Lớp 6') => {
     setSelectedGrade(newGrade);
     const num = newGrade.replace(/[^0-9]/g, '');
-    setLessonCode(`TOAN-${num}-HKI-SODAISO-C01-STT01`);
+    const subPrefix = selectedSubject.includes('Sử') ? 'SU' : selectedSubject.includes('Văn') ? 'VAN' : selectedSubject.includes('KHTN') ? 'KHTN' : selectedSubject.includes('Tin') ? 'TIN' : selectedSubject.includes('Địa') ? 'DIA' : selectedSubject.includes('Anh') ? 'ENG' : 'TOAN';
+    setLessonCode(`${subPrefix}-${num}-HKI-C01-STT01`);
     setSelectedCatalogLessonCode('');
     // Clear old catalog cache for switch if different grade
     if (catalogData && catalogData.grade !== newGrade) {
       setCatalogData(null);
-      localStorage.removeItem('khdh_stored_catalog_v1');
+      try {
+        localStorage.removeItem('khdh_stored_catalog_v1');
+      } catch {}
     }
-    handleExtractCatalog(false, newGrade);
+    handleExtractCatalog(true, newGrade, selectedSubject);
   };
 
   const handleResetCatalogCache = () => {
@@ -843,12 +867,23 @@ export default function Home() {
     handleExtractCatalog(true, selectedGrade);
   };
 
+  const handleSwitchSubject = (newSubject: string) => {
+    setSelectedSubject(newSubject);
+    setCatalogData(null);
+    try {
+      localStorage.removeItem('khdh_stored_catalog_v1');
+    } catch {}
+    handleExtractCatalog(true, selectedGrade, newSubject);
+  };
+
   const handleExtractCatalog = async (
     forceRefresh?: boolean | React.SyntheticEvent,
-    overrideGrade?: 'Lớp 9' | 'Lớp 8' | 'Lớp 7' | 'Lớp 6'
+    overrideGrade?: 'Lớp 9' | 'Lớp 8' | 'Lớp 7' | 'Lớp 6',
+    overrideSubject?: string
   ) => {
     const isForce = typeof forceRefresh === 'boolean' ? forceRefresh : false;
     const targetGrade = overrideGrade || selectedGrade;
+    const targetSubject = overrideSubject || selectedSubject || 'Lịch sử';
     setExtractingCatalog(true);
     setError(null);
     try {
@@ -861,7 +896,7 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           grade: targetGrade,
-          subject: 'Toán học',
+          subject: targetSubject,
           apiKeys: activeKeys,
           documentIds: activeDocIds,
           projectId: wsId,
@@ -2386,6 +2421,62 @@ export default function Home() {
             </div>
 
             {/* Quick Command Chips */}
+            {/* BỘ CHỌN MÔN HỌC & KHỐI LỚP TRỰC QUAN */}
+            <div className="space-y-2 p-3.5 bg-gradient-to-br from-slate-50 via-blue-50/40 to-indigo-50/30 border border-blue-200 rounded-2xl shadow-2xs">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                  <span>📚</span> Môn học &amp; Khối lớp:
+                </span>
+                <span className="text-[11px] font-black bg-blue-700 text-white px-2.5 py-0.5 rounded-full shadow-2xs">
+                  {selectedSubject} — {selectedGrade}
+                </span>
+              </div>
+
+              {/* Môn học Quick Chips */}
+              <div className="flex flex-wrap gap-1.5 pt-0.5">
+                {[
+                  { id: 'Lịch sử', label: '🏛️ Lịch sử' },
+                  { id: 'Địa lí', label: '🌍 Địa lí' },
+                  { id: 'Ngữ văn', label: '📖 Ngữ văn' },
+                  { id: 'Toán học', label: '📐 Toán học' },
+                  { id: 'Khoa học tự nhiên', label: '🔬 KHTN' },
+                  { id: 'Tin học', label: '💻 Tin học' },
+                  { id: 'Tiếng Anh', label: '🇬🇧 Tiếng Anh' },
+                ].map((sub) => (
+                  <button
+                    key={sub.id}
+                    type="button"
+                    onClick={() => handleSwitchSubject(sub.id)}
+                    className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                      selectedSubject === sub.id
+                        ? 'bg-blue-700 text-white shadow-xs scale-102 ring-1 ring-blue-500'
+                        : 'bg-white hover:bg-blue-50 text-slate-700 border border-slate-200'
+                    }`}
+                  >
+                    {sub.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Khối lớp Quick Chips */}
+              <div className="flex gap-1.5 pt-1 border-t border-blue-100">
+                {(['Lớp 9', 'Lớp 8', 'Lớp 7', 'Lớp 6'] as const).map((g) => (
+                  <button
+                    key={g}
+                    type="button"
+                    onClick={() => handleSwitchGrade(g)}
+                    className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                      selectedGrade === g
+                        ? 'bg-indigo-700 text-white shadow-xs scale-102 ring-1 ring-indigo-500'
+                        : 'bg-white hover:bg-indigo-50 text-slate-700 border border-slate-200'
+                    }`}
+                  >
+                    {g}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div>
               <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
                 Các lệnh thực thi nhanh:
