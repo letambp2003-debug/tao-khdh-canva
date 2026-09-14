@@ -34,6 +34,7 @@ export async function POST(request: NextRequest) {
       projectId,
       lockedConfig,
       formatMode, // 'SPLIT_PERIODS' | 'CONTINUOUS_4SECTION'
+      sectionStage, // 'ALL' | 'STAGE_1_MUC_TIEU_KHOI_DONG' | 'STAGE_2_HINH_THANH_KT' | 'STAGE_3_LUYEN_TAP' | 'STAGE_4_VAN_DUNG_HUONG_DAN'
     } = body;
 
     if (!command || typeof command !== 'string') {
@@ -58,12 +59,23 @@ export async function POST(request: NextRequest) {
     const activeJobId = jobId || `JOB-${Date.now()}`;
     const targetProject = await resolveUserProjectIdFromRequest(request, projectId);
 
+    // Xác định giai đoạn (Section Stage) nếu có
+    const effectiveStage = sectionStage || (
+      command.toUpperCase().includes('PHAN_A') ? 'STAGE_1_MUC_TIEU_KHOI_DONG' :
+      command.toUpperCase().includes('PHAN_B') ? 'STAGE_2_HINH_THANH_KT' :
+      command.toUpperCase().includes('PHAN_C') ? 'STAGE_3_LUYEN_TAP' :
+      command.toUpperCase().includes('PHAN_D') ? 'STAGE_4_VAN_DUNG_HUONG_DAN' :
+      'ALL'
+    );
+
     // Xác định chế độ xuất KHDH
     const isContinuous4Section =
       formatMode === 'CONTINUOUS_4SECTION' ||
       command.toUpperCase().includes('KHONG_TACH_TIET') ||
       command.toUpperCase().includes('4PHAN') ||
-      command.toUpperCase().includes('V11');
+      command.toUpperCase().includes('4_PHAN') ||
+      command.toUpperCase().includes('V11') ||
+      effectiveStage !== 'ALL';
 
     // 1. Lấy danh sách tài liệu nguồn sẵn sàng (Source Documents)
     let activeDocs = await SourceDocumentService.getActiveReady(targetProject);
@@ -123,40 +135,58 @@ export async function POST(request: NextRequest) {
       ].join('\n');
     }
 
-    // 2. Đọc file kỹ năng / form mẫu tương ứng với chế độ được chọn
+    // 2. Đọc file kỹ năng / form mẫu tương ứng
     let skillContent = '';
-    if (isContinuous4Section) {
-      try {
-        const v11FormPath = join(process.cwd(), '03_FORM_KHDH_V11_2_4PHAN_KHONG_TACHTIET.MD');
-        skillContent = await readFile(v11FormPath, 'utf-8');
-      } catch {
-        try {
-          const docsV11Path = join(process.cwd(), 'docs', '03_FORM_KHDH_V11_2_4PHAN_KHONG_TACHTIET.MD');
-          skillContent = await readFile(docsV11Path, 'utf-8');
-        } catch {
-          try {
-            const legacyV11Path = join(process.cwd(), '03_FORM_KHDH_V11_4PHAN_KHONG_TACHTIET.MD');
-            skillContent = await readFile(legacyV11Path, 'utf-8');
-          } catch {
-            skillContent = 'Soạn KHDH V11-2 FINAL 4 phần A-B-C-D không tách tiết, bảng 2 cột CV 5512.';
-          }
-        }
-      }
-    } else {
-      try {
-        const skillPath = join(process.cwd(), 'docs', 'agents', '04_KhdhBuilderAgent', 'skill.md');
-        skillContent = await readFile(skillPath, 'utf-8');
-      } catch {
-        try {
-          const rootForm = join(process.cwd(), '03_FORM_KHDH.MD');
-          skillContent = await readFile(rootForm, 'utf-8');
-        } catch {
-          skillContent = 'Soạn KHDH chuẩn V10.1 theo Công văn 5512 với 2 cột: HOẠT ĐỘNG CỦA GV VÀ HS | SẢN PHẨM DỰ KIẾN';
-        }
-      }
+    try {
+      const v11FormPath = join(process.cwd(), '03_FORM_KHDH_V11_2_4PHAN_KHONG_TACHTIET.MD');
+      skillContent = await readFile(v11FormPath, 'utf-8');
+    } catch {
+      skillContent = 'Soạn KHDH V11-2 FINAL 4 phần A-B-C-D không tách tiết, bảng 2 cột CV 5512.';
     }
 
-    // Xây dựng System Prompt cho từng chế độ
+    // Cấu hình prompt chuyên biệt cho từng Stage
+    let stageInstructions = '';
+    let stageUserRequirement = '';
+
+    if (effectiveStage === 'STAGE_1_MUC_TIEU_KHOI_DONG') {
+      stageInstructions = [
+        '### NHIỆM VỤ GIAI ĐOẠN 1 (PHẦN ĐẦU + MỤC TIÊU + THIẾT BỊ + A. KHỞI ĐỘNG):',
+        'Bắt buộc xuất hoàn chỉnh các phần sau (KHÔNG xuất phần B, C, D):',
+        '1. TIÊU ĐỀ & PHẦN ĐẦU KHDH (Trường, Tổ, Giáo viên, Tên bài, Lớp, Thời lượng, PPCT, Tuần).',
+        '2. # I. MỤC TIÊU (Đầy đủ: ## 1. Kiến thức - danh từ/cụm từ ngắn gọn; ## 2. Năng lực - hành động quan sát được; ## 3. Phẩm chất - hành vi cụ thể).',
+        '3. # II. THIẾT BỊ DẠY HỌC VÀ HỌC LIỆU (## 1. Giáo viên, ## 2. Học sinh).',
+        '4. # III. TIẾN TRÌNH DẠY HỌC',
+        '5. ## A. HOẠT ĐỘNG KHỞI ĐỘNG (Đầy đủ 4 bước a) Mục tiêu, b) Nội dung bài toán/tình huống thực tế mở đầu, c) Sản phẩm câu trả lời, d) Tổ chức thực hiện bảng 2 cột: HOẠT ĐỘNG CỦA GV VÀ HS | SẢN PHẨM DỰ KIẾN kèm Prompt tạo ảnh nếu có).',
+      ].join('\n');
+      stageUserRequirement = 'Soạn hoàn chỉnh Giai đoạn 1: Phần đầu -> # I. MỤC TIÊU -> # II. THIẾT BỊ DẠY HỌC VÀ HỌC LIỆU -> # III. TIẾN TRÌNH DẠY HỌC -> ## A. HOẠT ĐỘNG KHỞI ĐỘNG.';
+    } else if (effectiveStage === 'STAGE_2_HINH_THANH_KT') {
+      stageInstructions = [
+        '### NHIỆM VỤ GIAI ĐOẠN 2 (B. HOẠT ĐỘNG HÌNH THÀNH KIẾN THỨC MỚI - CHUYÊN SÂU & CHI TIẾT):',
+        'Tập trung 100% dung lượng soạn cực kỳ chi tiết, không rút gọn cho phần B:',
+        '1. Bắt đầu trực tiếp bằng: ## B. HOẠT ĐỘNG HÌNH THÀNH KIẾN THỨC MỚI',
+        '2. Phân chia rõ từng Hoạt động cụ thể (Hoạt động 1, Hoạt động 2, ... tương ứng các đơn vị kiến thức cốt lõi của bài học).',
+        '3. Mỗi hoạt động có đầy đủ 4 phần chuẩn CV 5512: a) Mục tiêu, b) Nội dung, c) Sản phẩm (định nghĩa, công thức, ví dụ giải mẫu chi tiết), d) Tổ chức thực hiện (Bước 1: Chuyển giao, Bước 2: Thực hiện, Bước 3: Báo cáo thảo luận, Bước 4: Kết luận nhận định) trong BẢNG 2 CỘT chuẩn.',
+        '4. Chèn mã TikZ / Overleaf cho các hình vẽ hình học chính xác và PROMPT TẠO ẢNH cho các hình ảnh minh họa thực tế.',
+      ].join('\n');
+      stageUserRequirement = 'Soạn hoàn chỉnh Giai đoạn 2: ## B. HOẠT ĐỘNG HÌNH THÀNH KIẾN THỨC MỚI với đầy đủ các hoạt động thành phần, chi tiết sâu, bảng 2 cột, công thức LaTeX và mã TikZ/Prompt ảnh.';
+    } else if (effectiveStage === 'STAGE_3_LUYEN_TAP') {
+      stageInstructions = [
+        '### NHIỆM VỤ GIAI ĐOẠN 3 (C. HOẠT ĐỘNG LUYỆN TẬP - HỆ THỐNG BÀI TẬP PHÂN HÓA):',
+        'Tập trung 100% dung lượng soạn bài bản, đầy đủ hệ thống bài tập cho phần C:',
+        '1. Bắt đầu trực tiếp bằng: ## C. HOẠT ĐỘNG LUYỆN TẬP',
+        '2. Có đầy đủ a) Mục tiêu củng cố kiến thức và rèn luyện kỹ năng, b) Nội dung (Gồm cả bài tập trắc nghiệm củng cố và hệ thống bài tập tự luận phân hóa từ mức độ Nhận biết -> Thông hiểu -> Vận dụng), c) Sản phẩm (Lời giải chi tiết, đáp án mẫu từng bài), d) Tổ chức thực hiện (Giao nhiệm vụ, hoạt động cá nhân/nhóm, báo cáo, đánh giá nhận xét) trong BẢNG 2 CỘT.',
+      ].join('\n');
+      stageUserRequirement = 'Soạn hoàn chỉnh Giai đoạn 3: ## C. HOẠT ĐỘNG LUYỆN TẬP với hệ thống bài tập phong phú, lời giải chi tiết và bảng 2 cột chuẩn 5512.';
+    } else if (effectiveStage === 'STAGE_4_VAN_DUNG_HUONG_DAN') {
+      stageInstructions = [
+        '### NHIỆM VỤ GIAI ĐOẠN 4 (D. HOẠT ĐỘNG VẬN DỤNG + IV. HƯỚNG DẪN VỀ NHÀ):',
+        '1. ## D. HOẠT ĐỘNG VẬN DỤNG: a) Mục tiêu vận dụng vào thực tiễn/liên môn, b) Nội dung bài toán thực tế/dự án nhỏ, c) Sản phẩm giải quyết vấn đề, d) Tổ chức thực hiện bảng 2 cột.',
+        '2. # IV. HƯỚNG DẪN VỀ NHÀ: Nội dung ôn tập, bài tập về nhà trong SGK/SBT, chuẩn bị cho bài học tiếp theo.',
+      ].join('\n');
+      stageUserRequirement = 'Soạn hoàn chỉnh Giai đoạn 4: ## D. HOẠT ĐỘNG VẬN DỤNG và # IV. HƯỚNG DẪN VỀ NHÀ.';
+    }
+
+    // Xây dựng System Prompt
     const systemPrompt = isContinuous4Section
       ? [
           'Bạn là KhdhBuilderAgent V11-2 FINAL — Chế độ SOẠN KHDH 4 PHẦN LIỀN MẠCH, KHÔNG TÁCH TIẾT (Theo Form 03_FORM_KHDH_V11_2_4PHAN_KHONG_TACHTIET.MD).',
@@ -164,34 +194,20 @@ export async function POST(request: NextRequest) {
           `Tổ chuyên môn: ${env.DEPARTMENT}`,
           `Giáo viên thực hiện: ${env.TEACHER_NAME}`,
           '',
-          '## HỢP ĐỒNG VÀ QUY TẮC BẮT BUỘC CHO CHẾ ĐỘ V11-2 KHÔNG TÁCH TIẾT:',
-          '0. CẤU TRÚC BẮT BUỘC CỦA TOÀN BỘ BẢN KHDH (XUẤT ĐẦY ĐỦ TỪ ĐẦU ĐẾN CUỐI):',
-          '   - PHẦN ĐẦU KHDH (Trường, Tổ, Giáo viên, Tên bài, Môn, Lớp, Thời lượng, PPCT, Tuần)',
-          '   - # I. MỤC TIÊU (BẮT BUỘC CÓ: ## 1. Kiến thức, ## 2. Năng lực, ## 3. Phẩm chất)',
-          '   - # II. THIẾT BỊ DẠY HỌC VÀ HỌC LIỆU (## 1. Giáo viên, ## 2. Học sinh)',
-          '   - # III. TIẾN TRÌNH DẠY HỌC (Gồm 4 hoạt động A, B, C, D)',
-          '   - # IV. HƯỚNG DẪN VỀ NHÀ',
-          '1. Toàn bộ tiến trình dạy học (Phần III) tổ chức thống nhất thành đúng 4 phần lớn:',
-          '   A. HOẠT ĐỘNG KHỞI ĐỘNG',
-          '   B. HOẠT ĐỘNG HÌNH THÀNH KIẾN THỨC (Các Hoạt động 1, 2, ... nối tiếp nhau)',
-          '   C. HOẠT ĐỘNG LUYỆN TẬP',
-          '   D. HOẠT ĐỘNG VẬN DỤNG',
-          '2. TUYỆT ĐỐI KHÔNG chia thành các tiêu đề TIẾT 1, TIẾT 2 trong bản KHDH xuất cuối. Tổng thời lượng = Số tiết × 45 phút và phân bổ liền mạch cho 4 phần A-B-C-D.',
-          '3. Quy tắc I.1 KIẾN THỨC: Viết theo cấu trúc "Danh từ/cụm danh từ + từ khóa của bài học". Chỉ nêu tên nội dung kiến thức cốt lõi. KHÔNG dùng động từ mô tả hành động HS, KHÔNG chép YCCĐ, KHÔNG giải thích/định nghĩa/công thức dài.',
-          '4. Quy tắc I.2 NĂNG LỰC: TUYỆT ĐỐI KHÔNG chia thành các tiểu mục "Năng lực chung", "Năng lực đặc thù". Viết trực tiếp bằng HÀNH ĐỘNG QUAN SÁT ĐƯỢC của học sinh (thực hiện, phân tích, lựa chọn, giải quyết, trình bày, trao đổi, sử dụng công cụ, vận dụng...).',
-          '5. Quy tắc I.3 PHẨM CHẤT: Gắn trực tiếp với hành vi cụ thể quan sát được (ví dụ: \\- **Chăm chỉ:** [Hành vi cụ thể]).',
-          '6. Tiến trình dạy học CHỈ DÙNG ĐÚNG 2 CỘT: HOẠT ĐỘNG CỦA GV VÀ HS | SẢN PHẨM DỰ KIẾN (Không thêm cột NLS/AI).',
-          '7. Mỗi hoạt động có đủ 4 phần: a) Mục tiêu, b) Nội dung, c) Sản phẩm, d) Tổ chức thực hiện (Bước 1, 2, 3, 4).',
-          '8. Hình học chính xác dùng mã TikZ / Overleaf ngay dưới nội dung cần vẽ; Ảnh minh họa thực tế dùng PROMPT TẠO ẢNH ngay dưới nội dung.',
-          '9. KHDH cuối kết thúc sau mục IV. HƯỚNG DẪN VỀ NHÀ (KHÔNG xuất mục V. KẾ HOẠCH ĐÁNH GIÁ).',
-          '10. Công thức toán dùng chuẩn LaTeX $...$ hoặc $$...$$.',
-          '11. TUYỆT ĐỐI KHÔNG xuất khối JSON AgentMessage, metadata JSON hay code block markdown ở đầu bản thảo. Bắt đầu trực tiếp bằng tiêu đề giáo án hoặc phần đầu KHDH.',
+          '## QUY TẮC BẮT BUỘC:',
+          '1. Tiến trình dạy học CHỈ DÙNG ĐÚNG 2 CỘT: HOẠT ĐỘNG CỦA GV VÀ HS | SẢN PHẨM DỰ KIẾN.',
+          '2. Mỗi hoạt động có đủ 4 phần: a) Mục tiêu, b) Nội dung, c) Sản phẩm, d) Tổ chức thực hiện (Bước 1, 2, 3, 4).',
+          '3. Công thức toán dùng chuẩn LaTeX $...$ hoặc $$...$$.',
+          '4. Hình học chính xác dùng mã TikZ / Overleaf; ảnh minh họa thực tế dùng PROMPT TẠO ẢNH.',
+          '5. TUYỆT ĐỐI KHÔNG xuất JSON metadata, code fence markdown ở ngoài.',
+          '',
+          stageInstructions,
           '',
           lockedConfigSection,
           '',
           sourceContextText,
           '',
-          '## HƯỚNG DẪN CẤU TRÚC FORM V11-2 CHUẨN:',
+          '## HƯỚNG DẪN CẤU TRÚC FORM CHUẨN:',
           skillContent,
         ].join('\n')
       : [
@@ -202,31 +218,30 @@ export async function POST(request: NextRequest) {
           '',
           '## HỢP ĐỒNG VÀ QUY TẮC BẮT BUỘC CHO CHẾ ĐỘ TÁCH TIẾT:',
           '1. Phân chia bài học theo từng TIẾT [PPCT] (Tiết 1, Tiết 2, ...) tương ứng với phân phối chương trình.',
-          '2. Mục I.1 KIẾN THỨC chỉ liệt kê tên danh mục ngắn gọn (2-12 từ), KHÔNG giải thích, KHÔNG YCCĐ.',
-          '3. Tiến trình dạy học CHỈ DÙNG ĐÚNG 2 CỘT: HOẠT ĐỘNG CỦA GV VÀ HS | SẢN PHẨM DỰ KIẾN.',
-          '4. Mỗi hoạt động có đủ 4 phần: a) Mục tiêu, b) Nội dung, c) Sản phẩm, d) Tổ chức thực hiện (Bước 1, 2, 3, 4).',
-          '5. Công thức toán dùng chuẩn LaTeX $...$ hoặc $$...$$.',
-          '6. Hình học chính xác dùng mã TikZ / Overleaf; ảnh minh họa thực tế dùng PROMPT TẠO ẢNH ngay dưới nội dung.',
-          '7. TUYỆT ĐỐI KHÔNG xuất khối JSON AgentMessage, metadata JSON hay code block markdown ở đầu bản thảo. Bắt đầu trực tiếp bằng tiêu đề giáo án `# KẾ HOẠCH BÀI DẠY: ...`.',
+          '2. Tiến trình dạy học CHỈ DÙNG ĐÚNG 2 CỘT: HOẠT ĐỘNG CỦA GV VÀ HS | SẢN PHẨM DỰ KIẾN.',
+          '3. Mỗi hoạt động có đủ 4 phần: a) Mục tiêu, b) Nội dung, c) Sản phẩm, d) Tổ chức thực hiện.',
+          '4. Công thức toán dùng chuẩn LaTeX $...$ hoặc $$...$$.',
+          '',
+          stageInstructions,
           '',
           lockedConfigSection,
           '',
           sourceContextText,
-          '',
-          '## HƯỚNG DẪN CHUYÊN MÔN:',
-          skillContent,
         ].join('\n');
 
     const userMessage = [
       `LỆNH THỰC THI: ${command} ${lessonCode || ''}`,
-      `CHẾ ĐỘ SOẠN: ${isContinuous4Section ? 'V11 FINAL - KHÔNG TÁCH TIẾT (4 PHẦN A-B-C-D LIỀN MẠCH)' : 'V10.1 - TÁCH TIẾT THEO PPCT'}`,
+      `GIAI ĐOẠN SOẠN (STAGE): ${effectiveStage}`,
+      `CHẾ ĐỘ SOẠN: ${isContinuous4Section ? 'V11 FINAL - 4 PHẦN A-B-C-D' : 'V10.1 - TÁCH TIẾT'}`,
       `MÃ BÀI HỌC: ${lockedConfig?.lessonTitle || lessonCode || 'TỰ ĐỘNG'}`,
       `MÃ CÔNG VIỆC: ${activeJobId}`,
       lockedConfigSection,
       '',
-      isContinuous4Section
-        ? 'Hãy thực thi lệnh và tạo bản Kế hoạch bài dạy hoàn chỉnh theo đúng FORM V11-2 KHÔNG TÁCH TIẾT. BẮT BUỘC XUẤT ĐẦY ĐỦ TỪ: Phần đầu KHDH -> # I. MỤC TIÊU (1. Kiến thức, 2. Năng lực, 3. Phẩm chất) -> # II. THIẾT BỊ DẠY HỌC VÀ HỌC LIỆU -> # III. TIẾN TRÌNH DẠY HỌC (A, B, C, D bảng 2 cột kèm TikZ/Prompt ảnh) -> # IV. HƯỚNG DẪN VỀ NHÀ.'
-        : 'Hãy thực thi lệnh và tạo bản Kế hoạch bài dạy hoàn chỉnh, chi tiết, đúng định dạng Tách tiết V10.1, tuân thủ nghiêm ngặt các căn cứ tài liệu nguồn và Cấu hình đã được cố định ở trên. Bắt đầu trực tiếp bằng # KẾ HOẠCH BÀI DẠY.',
+      stageUserRequirement || (
+        isContinuous4Section
+          ? 'Hãy thực thi lệnh và tạo bản Kế hoạch bài dạy hoàn chỉnh theo đúng FORM V11-2. BẮT BUỘC XUẤT ĐẦY ĐỦ TỪ: Phần đầu KHDH -> # I. MỤC TIÊU -> # II. THIẾT BỊ DẠY HỌC VÀ HỌC LIỆU -> # III. TIẾN TRÌNH DẠY HỌC (A, B, C, D bảng 2 cột) -> # IV. HƯỚNG DẪN VỀ NHÀ.'
+          : 'Hãy thực thi lệnh và tạo bản Kế hoạch bài dạy hoàn chỉnh, chi tiết theo đúng định dạng Tách tiết V10.1.'
+      ),
     ].join('\n');
 
     const result = await GeminiService.generateContent({
@@ -234,6 +249,7 @@ export async function POST(request: NextRequest) {
       systemPrompt,
       userMessage,
       model: 'pro',
+      maxTokens: 8192,
     });
 
     const cleanDraft = ContentNormalizer.cleanMetadata(result.text);
@@ -242,6 +258,7 @@ export async function POST(request: NextRequest) {
       status: 'OK',
       job_id: activeJobId,
       command,
+      section_stage: effectiveStage,
       format_mode: isContinuous4Section ? 'CONTINUOUS_4SECTION' : 'SPLIT_PERIODS',
       lesson_code: lessonCode || 'AUTO',
       khdh_draft: cleanDraft,

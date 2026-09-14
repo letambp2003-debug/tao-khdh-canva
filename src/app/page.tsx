@@ -19,9 +19,14 @@ import type { LessonRequirementAnalysis } from '@/types/lesson-analysis.types';
 import type { CurriculumCatalog, CatalogLessonItem } from '@/types/curriculum-catalog.types';
 
 const COMMANDS = [
+  { id: 'SOAN_4_PHAN_LIEN_HOAN', label: '✨ Soạn liên hoàn 4 Phần (Đầy đủ 100%)', desc: 'Chạy tuần tự 4 giai đoạn A-B-C-D rồi ghép nối liền mạch (Không bị cắt ngắn)' },
   { id: 'DANH_MUC', label: '📑 Danh mục bài học (Trích xuất)', desc: 'Trích xuất toàn bộ danh mục bài học, số tiết, tuần từ PL1/PPCT' },
-  { id: 'SOAN_V11_KHONG_TACH_TIET', label: '📄 Soạn KHDH V11 (Không tách tiết)', desc: 'Tiến trình 4 phần A-B-C-D liền mạch (V11-2 FINAL)' },
+  { id: 'SOAN_V11_KHONG_TACH_TIET', label: '📄 Soạn KHDH V11 (1 lượt)', desc: 'Tiến trình 4 phần A-B-C-D liền mạch (V11-2 FINAL)' },
   { id: 'SOAN_XUAT', label: '✂️ Soạn KHDH (Tách tiết)', desc: 'Phân chia theo từng Tiết PPCT (V10.1)' },
+  { id: 'SOAN_PHAN_A', label: '🚩 Phần A: Khởi động & Mục tiêu', desc: 'Soạn Mục tiêu, Thiết bị & Hoạt động mở đầu' },
+  { id: 'SOAN_PHAN_B', label: '💡 Phần B: Hình thành kiến thức', desc: 'Soạn chuyên sâu từng hoạt động khám phá & TikZ' },
+  { id: 'SOAN_PHAN_C', label: '📝 Phần C: Luyện tập phân hóa', desc: 'Soạn hệ thống bài tập và lời giải chi tiết' },
+  { id: 'SOAN_PHAN_D', label: '🚀 Phần D: Vận dụng & Về nhà', desc: 'Soạn tình huống thực tế và hướng dẫn tự học' },
   { id: 'KHOI_DONG', label: '🚀 Khởi động & Kiểm tra', desc: 'Lập chỉ mục nguồn & kiểm tra hệ thống' },
   { id: 'RA_SOAT_NHANH', label: '🔍 Rà soát nhanh (Delta QA)', desc: 'Kiểm tra lỗi và độ khớp nguồn' },
   { id: 'KIEM_TRA_TOAN', label: '📐 Kiểm tra Toán & OMML', desc: 'Chuẩn hóa công thức & Word Equation' },
@@ -1030,31 +1035,112 @@ export default function Home() {
 
     setLoading(true);
     setError(null);
-    setPipelineStep(
-      activeMode === 'CONTINUOUS_4SECTION'
-        ? 'Đang chuẩn bị căn cứ tài liệu nguồn & cấu trúc V11-2 Không Tách Tiết (4 Phần A-B-C-D)...'
-        : 'Đang chuẩn bị căn cứ tài liệu nguồn & cấu trúc Tách Tiết theo PPCT...'
-    );
     setOutputData(null);
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
+    const startTime = Date.now();
 
     try {
       const wsId = getUserWorkspaceId(currentUser);
       const activeKeys = currentParsedKeys.length > 0 ? currentParsedKeys : ApiKeyService.getClientKeys();
       const jobId = `JOB-${Date.now()}`;
-
-      // Lấy danh sách ID các tài liệu đang Active & Ready
       const activeDocIds = documents.filter((d) => d.isActive && d.status === 'READY').map((d) => d.id);
+      const targetConfig = configOverride || (isConfigLocked ? lessonAnalysis : undefined);
 
+      // XỬ LÝ CHẾ ĐỘ SOẠN LIÊN HOÀN 4 PHẦN (MULTI-STAGE PIPELINE)
+      if (activeCmd === 'SOAN_4_PHAN_LIEN_HOAN') {
+        const stages = [
+          { stage: 'STAGE_1_MUC_TIEU_KHOI_DONG', label: 'Bước 1/4: Mục tiêu, Thiết bị & Hoạt động Khởi động' },
+          { stage: 'STAGE_2_HINH_THANH_KT', label: 'Bước 2/4: Hình thành kiến thức mới chuyên sâu & TikZ' },
+          { stage: 'STAGE_3_LUYEN_TAP', label: 'Bước 3/4: Luyện tập phân hóa & Bảng 2 cột' },
+          { stage: 'STAGE_4_VAN_DUNG_HUONG_DAN', label: 'Bước 4/4: Vận dụng & Hướng dẫn về nhà' },
+        ];
+
+        let combinedDraft = '';
+        let totalInputTokens = 0;
+        let totalOutputTokens = 0;
+        let lastModel = 'Gemini Pro (4-Stage Cascade)';
+        let lastKey = '';
+
+        for (let i = 0; i < stages.length; i++) {
+          const st = stages[i];
+          setPipelineStep(`⏳ ${st.label}...`);
+
+          const res = await fetch('/api/generate-khdh', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              command: 'SOAN_V11_KHONG_TACH_TIET',
+              formatMode: 'CONTINUOUS_4SECTION',
+              sectionStage: st.stage,
+              lessonCode: targetConfig?.lessonTitle || activeLessonCode,
+              jobId: `${jobId}-STAGE-${i + 1}`,
+              apiKeys: activeKeys,
+              documentIds: activeDocIds,
+              projectId: wsId,
+              lockedConfig: targetConfig,
+            }),
+            signal: controller.signal,
+          });
+
+          const data = await res.json();
+          if (!res.ok) {
+            throw new Error(data.message || `Lỗi tại ${st.label}`);
+          }
+
+          if (data.khdh_draft) {
+            combinedDraft = combinedDraft ? `${combinedDraft}\n\n---\n\n${data.khdh_draft}` : data.khdh_draft;
+          }
+          if (data.token_usage) {
+            totalInputTokens += data.token_usage.inputTokens || 0;
+            totalOutputTokens += data.token_usage.outputTokens || 0;
+          }
+          lastModel = data.model || lastModel;
+          lastKey = data.key_used || lastKey;
+        }
+
+        const mergedOutput: OutputData = {
+          status: 'OK',
+          job_id: jobId,
+          command: activeCmd,
+          format_mode: 'CONTINUOUS_4SECTION',
+          lesson_code: activeLessonCode,
+          khdh_draft: combinedDraft,
+          token_usage: {
+            inputTokens: totalInputTokens,
+            outputTokens: totalOutputTokens,
+            totalTokens: totalInputTokens + totalOutputTokens,
+          },
+          model: lastModel,
+          duration_ms: Date.now() - startTime,
+          key_used: lastKey,
+          sources_used: activeDocIds.map((id) => ({ id, name: id, type: 'PL1' as SourceDocumentType, version: 1 })),
+        };
+
+        setOutputData(mergedOutput);
+        setPipelineStep('Hoàn tất giáo án 4 phần chuẩn 100%!');
+        handleRecordTaskHistory(
+          'SOAN_KHDH_V11',
+          activeLessonCode,
+          activeCmd,
+          combinedDraft,
+          'CONTINUOUS_4SECTION',
+          mergedOutput.token_usage,
+          lastModel,
+          mergedOutput.duration_ms,
+          lastKey
+        );
+        setActiveTab('draft');
+        return;
+      }
+
+      // XỬ LÝ SOẠN ĐƠN LẺ / TÁCH TIẾT / CÁC LỆNH KHÁC
       setPipelineStep(
         activeMode === 'CONTINUOUS_4SECTION'
-          ? 'Đang soạn KHDH V11 (4 phần A-B-C-D liền mạch, gạch đầu dòng chuẩn, bảng đánh giá)...'
+          ? 'Đang soạn KHDH V11 (4 phần A-B-C-D liền mạch, bảng 2 cột chuẩn)...'
           : 'Đang soạn KHDH Tách tiết (Phân theo từng Tiết PPCT, chuẩn CV 5512)...'
       );
-
-      const targetConfig = configOverride || (isConfigLocked ? lessonAnalysis : undefined);
 
       const res = await fetch('/api/generate-khdh', {
         method: 'POST',
@@ -1062,7 +1148,7 @@ export default function Home() {
         body: JSON.stringify({
           command: activeCmd,
           formatMode: activeMode,
-          lessonCode: targetConfig?.lessonTitle || lessonCode.trim(),
+          lessonCode: targetConfig?.lessonTitle || activeLessonCode,
           jobId,
           apiKeys: activeKeys,
           documentIds: activeDocIds,
