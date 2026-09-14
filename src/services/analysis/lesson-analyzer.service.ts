@@ -26,34 +26,57 @@ export class LessonAnalyzerService {
 
     const { systemContext: sourceContextText } = SourceContextBuilder.buildPromptContext(activeDocs);
 
+    // Tự động nhận diện khối lớp từ input hoặc tài liệu
+    const lessonInput = (req.lessonCode || '').toLowerCase();
+    let detectedGrade = 'Lớp 9';
+    if (lessonInput.includes('9') || lessonInput.includes('toan-9') || lessonInput.includes('toán 9')) {
+      detectedGrade = 'Lớp 9';
+    } else if (lessonInput.includes('8') || lessonInput.includes('toan-8') || lessonInput.includes('toán 8')) {
+      detectedGrade = 'Lớp 8';
+    } else if (lessonInput.includes('7') || lessonInput.includes('toan-7') || lessonInput.includes('toán 7')) {
+      detectedGrade = 'Lớp 7';
+    } else if (lessonInput.includes('6') || lessonInput.includes('toan-6') || lessonInput.includes('toán 6')) {
+      detectedGrade = 'Lớp 6';
+    } else {
+      const docText = activeDocs.map((d) => `${d.displayName} ${d.originalFileName}`).join(' ').toLowerCase();
+      if (docText.includes('9') || docText.includes('toán 9')) detectedGrade = 'Lớp 9';
+      else if (docText.includes('8') || docText.includes('toán 8')) detectedGrade = 'Lớp 8';
+      else if (docText.includes('7') || docText.includes('toán 7')) detectedGrade = 'Lớp 7';
+      else if (docText.includes('6') || docText.includes('toán 6')) detectedGrade = 'Lớp 6';
+    }
+
     const systemPrompt = [
-      'Bạn là Chuyên viên Phân tích Sư phạm & Thẩm định Chương trình GDPT 2018 (Toán học).',
+      'Bạn là Chuyên viên Phân tích Sư phạm & Thẩm định Chương trình GDPT 2018 (Toán học THCS).',
       'Nhiệm vụ: Phân tích Mã bài học hoặc Tên bài/Yêu cầu của giáo viên, tra cứu và đối chiếu với Tài liệu nguồn (Phụ lục I, PPCT, SGK) để trích xuất CẤU HÌNH YÊU CẦU BÀI HỌC CHUẨN.',
       '',
       sourceContextText,
       '',
+      '## NGUYÊN TẮC BẮT BUỘC:',
+      `1. **ĐÚNG KHỐI LỚP**: Xác định chính xác khối lớp từ mã bài học/tên bài và tài liệu nguồn (Đang phân tích: ${detectedGrade}). TUYỆT ĐỐI KHÔNG NHẦM LẪN KIẾN THỨC GIỮA CÁC KHỐI LỚP (Ví dụ: Toán 9 gồm Phương trình bậc nhất 2 ẩn, Căn bậc hai, Hệ thức lượng, Đường tròn...; Toán 8 gồm Đa thức, Hằng đẳng thức, Tứ giác, Thalès...).`,
+      '2. **ĐÚNG YCCĐ CỐT LÕI**: Bóc tách chính xác Yêu cầu cần đạt từ Phụ lục I và SGK hiện hành.',
+      '',
       '## YÊU CẦU ĐẦU RA JSON BẮT BUỘC:',
       'Bạn PHẢI trả về ĐÚNG MỘT JSON OBJECT theo đúng cấu trúc sau (KHÔNG có markdown bao ngoài, KHÔNG có text giải thích ngoài JSON):',
       '{',
-      '  "lessonTitle": "Tên bài học chuẩn (Ví dụ: Bài 1: Đơn thức và đa thức nhiều biến)",',
-      '  "lessonCode": "' + (req.lessonCode || 'TOAN-8') + '",',
+      '  "lessonTitle": "Tên bài học chuẩn từ nguồn",',
+      '  "lessonCode": "' + (req.lessonCode || `TOAN-${detectedGrade.replace(/[^0-9]/g, '')}`) + '",',
       '  "subject": "Toán học",',
-      '  "grade": "Lớp 8",',
+      '  "grade": "' + detectedGrade + '",',
       '  "term": "Học kỳ I",',
       '  "totalPeriods": 2,',
       '  "periodBreakdown": [',
-      '    "Tiết 1: Đơn thức nhiều biến và thu gọn đơn thức",',
-      '    "Tiết 2: Đa thức nhiều biến và cộng trừ đa thức"',
+      '    "Tiết 1: Tên nội dung tiết 1",',
+      '    "Tiết 2: Tên nội dung tiết 2"',
       '  ],',
       '  "objectives": {',
       '    "knowledge": [',
-      '      "Nhận biết được đơn thức, đa thức nhiều biến",',
-      '      "Nhận biết được đơn thức đồng dạng và bậc của đơn thức"',
+      '      "Yêu cầu về kiến thức 1",',
+      '      "Yêu cầu về kiến thức 2"',
       '    ],',
       '    "competencies": [',
       '      "Năng lực tư duy và lập luận toán học",',
       '      "Năng lực giải quyết vấn đề toán học",',
-      '      "Năng lực mô hình hóa toán học thông qua các bài toán thực tế"',
+      '      "Năng lực mô hình hóa toán học"',
       '    ],',
       '    "qualities": [',
       '      "Chăm chỉ, tích cực tham gia hoạt động nhóm",',
@@ -61,14 +84,12 @@ export class LessonAnalyzerService {
       '    ]',
       '  },',
       '  "keyConcepts": [',
-      '    "Đơn thức nhiều biến",',
-      '    "Bậc của đơn thức",',
-      '    "Đơn thức đồng dạng",',
-      '    "Đa thức nhiều biến"',
+      '    "Khái niệm trọng tâm 1",',
+      '    "Khái niệm trọng tâm 2"',
       '  ],',
       '  "pedagogicalMethods": [',
       '    "Dạy học khám phá và phát hiện vấn đề",',
-      '    "Trực quan hóa hình học và đại số",',
+      '    "Trực quan hóa và mô hình hóa",',
       '    "Thảo luận nhóm & Khăn trải bàn"',
       '  ],',
       '  "selectedOutputs": {',
@@ -85,7 +106,7 @@ export class LessonAnalyzerService {
     const userMessage = [
       'MÃ BÀI HỌC / THAM SỐ ĐẦU VÀO TỪ GIÁO VIÊN: ' + (req.lessonCode || 'Chưa nhập'),
       'LỆNH QUY ĐỊNH: ' + (req.command || 'SOAN_XUAT'),
-      'Hãy phân tích sâu sắc các yêu cầu bài học và trả về JSON chuẩn xác.',
+      `HÃY PHÂN TÍCH CHÍNH XÁC YÊU CẦU BÀI HỌC THEO ĐÚNG KHỐI ${detectedGrade.toUpperCase()} VÀ TÀI LIỆU NGUỒN.`,
     ].join('\n');
 
     let analysis: LessonRequirementAnalysis;
@@ -108,7 +129,7 @@ export class LessonAnalyzerService {
       }
       analysis = JSON.parse(cleanText);
     } catch {
-      analysis = LessonAnalyzerService.buildFallbackAnalysis(req.lessonCode || 'TOAN-8-HKI-SODAISO-C01-STT01');
+      analysis = LessonAnalyzerService.buildFallbackAnalysis(req.lessonCode || 'TOAN-9-HKI-SODAISO-C01-STT01');
     }
 
     return {
@@ -118,68 +139,103 @@ export class LessonAnalyzerService {
   }
 
   /**
-   * Tạo bản phân tích dự phòng chuẩn mực
+   * Tạo bản phân tích dự phòng chuẩn mực theo đúng Khối lớp
    */
   public static buildFallbackAnalysis(lessonInput: string): LessonRequirementAnalysis {
-    let title = 'Bài 1: Đơn thức và đa thức nhiều biến';
-    let grade = 'Lớp 8';
+    const clean = (lessonInput || '').toLowerCase();
+    let grade = 'Lớp 9';
     let term = 'Học kỳ I';
-    let periods = 2;
 
-    if (lessonInput.toLowerCase().includes('7') || lessonInput.includes('-7-')) {
+    if (clean.includes('8') || clean.includes('-8-') || clean.includes('toán 8')) {
+      grade = 'Lớp 8';
+    } else if (clean.includes('7') || clean.includes('-7-') || clean.includes('toán 7')) {
       grade = 'Lớp 7';
-    } else if (lessonInput.toLowerCase().includes('6') || lessonInput.includes('-6-')) {
+    } else if (clean.includes('6') || clean.includes('-6-') || clean.includes('toán 6')) {
       grade = 'Lớp 6';
-    } else if (lessonInput.toLowerCase().includes('9') || lessonInput.includes('-9-')) {
+    } else {
       grade = 'Lớp 9';
     }
 
-    if (lessonInput.toLowerCase().includes('hkii') || lessonInput.toLowerCase().includes('hk2')) {
+    if (clean.includes('hkii') || clean.includes('hk2') || clean.includes('học kỳ 2')) {
       term = 'Học kỳ II';
     }
 
-    if (lessonInput.length > 5 && !lessonInput.startsWith('TOAN-')) {
-      title = lessonInput;
+    if (grade === 'Lớp 9') {
+      return {
+        lessonTitle: 'Bài 1: Khái niệm phương trình và hệ hai phương trình bậc nhất hai ẩn',
+        lessonCode: lessonInput || 'TOAN-9-HKI-C01-STT01',
+        subject: 'Toán học',
+        grade: 'Lớp 9',
+        term,
+        totalPeriods: 2,
+        periodBreakdown: [
+          'Tiết 1: Khái niệm phương trình bậc nhất hai ẩn và tập nghiệm',
+          'Tiết 2: Khái niệm hệ hai phương trình bậc nhất hai ẩn',
+        ],
+        objectives: {
+          knowledge: [
+            'Nhận biết được phương trình bậc nhất hai ẩn và nghiệm của phương trình',
+            'Nhận biết được hệ hai phương trình bậc nhất hai ẩn và nghiệm của hệ',
+          ],
+          competencies: [
+            'Năng lực tư duy và lập luận toán học trong biểu diễn nghiệm',
+            'Năng lực giải quyết vấn đề toán học thông qua bài toán thực tế',
+            'Năng lực mô hình hóa toán học',
+          ],
+          qualities: [
+            'Chăm chỉ, tích cực tìm tòi khám phá kiến thức',
+            'Trách nhiệm, cẩn thận và chính xác trong tính toán',
+          ],
+        },
+        keyConcepts: [
+          'Phương trình bậc nhất hai ẩn ax + by = c',
+          'Nghiệm và tập nghiệm của phương trình bậc nhất hai ẩn',
+          'Hệ hai phương trình bậc nhất hai ẩn',
+        ],
+        pedagogicalMethods: [
+          'Dạy học phát hiện và giải quyết vấn đề',
+          'Phương pháp trực quan hóa nghiệm trên mặt phẳng tọa độ',
+          'Phương pháp thảo luận nhóm',
+        ],
+        selectedOutputs: {
+          khdhDraft: true,
+          worksheet: true,
+          game: true,
+          videoStoryboard: true,
+          canvaSlides: true,
+        },
+        customNotes: 'Bám sát SGK Toán 9 hiện hành (GDPT 2018) và chuẩn CV 5512',
+      };
     }
 
+    // Default Lớp 8 Fallback
     return {
-      lessonTitle: title,
-      lessonCode: lessonInput,
+      lessonTitle: 'Bài 1: Đơn thức nhiều biến. Đa thức nhiều biến',
+      lessonCode: lessonInput || 'TOAN-8-HKI-C01-STT01',
       subject: 'Toán học',
-      grade,
+      grade: 'Lớp 8',
       term,
-      totalPeriods: periods,
+      totalPeriods: 2,
       periodBreakdown: [
-        'Tiết 1: Đơn thức nhiều biến, đơn thức thu gọn và bậc của đơn thức',
-        'Tiết 2: Đa thức nhiều biến, thu gọn đa thức và ứng dụng thực tế',
+        'Tiết 1: Đơn thức nhiều biến và thu gọn đơn thức',
+        'Tiết 2: Đa thức nhiều biến và thu gọn đa thức',
       ],
       objectives: {
         knowledge: [
-          'Nhận biết được đơn thức, đa thức nhiều biến qua các ví dụ cụ thể.',
-          'Biết cách xác định hệ số, phần biến và bậc của một đơn thức.',
-          'Thực hiện thành thạo phép thu gọn đơn thức và đa thức đồng dạng.',
+          'Nhận biết được đơn thức, đa thức nhiều biến',
+          'Thu gọn và xác định bậc của đơn thức, đa thức',
         ],
         competencies: [
-          'Năng lực tư duy và lập luận toán học thông qua phân biệt đơn thức và đa thức.',
-          'Năng lực giải quyết vấn đề toán học khi áp dụng biểu thức tính diện tích, thể tích thực tế.',
-          'Năng lực giao tiếp toán học khi trình bày lời giải và thảo luận nhóm.',
+          'Năng lực tư duy và lập luận toán học',
+          'Năng lực giải quyết vấn đề toán học',
         ],
         qualities: [
-          'Chăm chỉ: Tích cực tìm tòi, hoàn thành phiếu học tập cá nhân.',
-          'Trách nhiệm: Hợp tác nghiêm túc trong hoạt động nhóm và trò chơi tương tác.',
+          'Chăm chỉ, tích cực tham gia xây dựng bài',
+          'Trách nhiệm, cẩn thận và chính xác',
         ],
       },
-      keyConcepts: [
-        'Khái niệm đơn thức nhiều biến',
-        'Hệ số, phần biến và bậc của đơn thức',
-        'Đơn thức đồng dạng và quy tắc cộng/trừ',
-        'Đa thức nhiều biến và thu gọn đa thức',
-      ],
-      pedagogicalMethods: [
-        'Phương pháp dạy học khám phá (Gợi mở - Vấn đáp)',
-        'Phương pháp trực quan hóa (Hình ảnh, đồ họa 3D, mô hình)',
-        'Phương pháp thảo luận nhóm kết hợp Phiếu học tập phân hóa',
-      ],
+      keyConcepts: ['Đơn thức nhiều biến', 'Bậc của đơn thức', 'Đa thức nhiều biến'],
+      pedagogicalMethods: ['Dạy học khám phá', 'Luyện tập thực hành', 'Khăn trải bàn'],
       selectedOutputs: {
         khdhDraft: true,
         worksheet: true,
@@ -187,8 +243,7 @@ export class LessonAnalyzerService {
         videoStoryboard: true,
         canvaSlides: true,
       },
-      customNotes: 'Tuân thủ nghiêm ngặt tiến trình 2 cột Công văn 5512 và chuẩn OMML Microsoft Word.',
-      isLocked: false,
+      customNotes: 'Bám sát định dạng 2 cột theo CV 5512 và chuẩn OMML',
     };
   }
 }

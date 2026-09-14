@@ -101,7 +101,8 @@ export default function Home() {
 
   const [command, setCommand] = useState('SOAN_V11_KHONG_TACH_TIET');
   const [khdhFormatMode, setKhdhFormatMode] = useState<'SPLIT_PERIODS' | 'CONTINUOUS_4SECTION'>('CONTINUOUS_4SECTION');
-  const [lessonCode, setLessonCode] = useState('TOAN-8-HKI-SODAISO-C01-STT01');
+  const [selectedGrade, setSelectedGrade] = useState<'Lớp 9' | 'Lớp 8' | 'Lớp 7' | 'Lớp 6'>('Lớp 9');
+  const [lessonCode, setLessonCode] = useState('TOAN-9-HKI-SODAISO-C01-STT01');
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'draft' | 'preview' | 'catalog' | 'worksheet' | 'game' | 'storyboard' | 'slide' | 'sources' | 'history' | 'stats'>('draft');
   const [taskHistory, setTaskHistory] = useState<TaskHistoryItem[]>([]);
@@ -594,6 +595,26 @@ export default function Home() {
       if (data.success) {
         setDocuments(data.documents || []);
         setReadiness(data.readiness || null);
+
+        // Tự động nhận diện khối lớp từ tài liệu nạp lên
+        const docText = (data.documents || [])
+          .map((d: SourceDocument) => `${d.displayName} ${d.originalFileName}`)
+          .join(' ')
+          .toLowerCase();
+
+        if (/\b(toán\s*9|lớp\s*9|lop\s*9|toan\s*9|-9-|_9_|k9)\b/i.test(docText)) {
+          setSelectedGrade('Lớp 9');
+          setLessonCode((prev) => (prev.includes('TOAN-8') ? 'TOAN-9-HKI-SODAISO-C01-STT01' : prev));
+        } else if (/\b(toán\s*8|lớp\s*8|lop\s*8|toan\s*8|-8-|_8_|k8)\b/i.test(docText)) {
+          setSelectedGrade('Lớp 8');
+        } else if (/\b(toán\s*7|lớp\s*7|lop\s*7|toan\s*7|-7-|_7_|k7)\b/i.test(docText)) {
+          setSelectedGrade('Lớp 7');
+          setLessonCode((prev) => (prev.includes('TOAN-8') ? 'TOAN-7-HKI-SODAISO-C01-STT01' : prev));
+        } else if (/\b(toán\s*6|lớp\s*6|lop\s*6|toan\s*6|-6-|_6_|k6)\b/i.test(docText)) {
+          setSelectedGrade('Lớp 6');
+          setLessonCode((prev) => (prev.includes('TOAN-8') ? 'TOAN-6-HKI-SODAISO-C01-STT01' : prev));
+        }
+
       }
     } catch (err) {
       console.error('Error fetching documents:', err);
@@ -793,8 +814,32 @@ export default function Home() {
     }
   };
 
-  const handleExtractCatalog = async (forceRefresh?: boolean | React.SyntheticEvent) => {
+
+  const handleSwitchGrade = (newGrade: 'Lớp 9' | 'Lớp 8' | 'Lớp 7' | 'Lớp 6') => {
+    setSelectedGrade(newGrade);
+    const num = newGrade.replace(/[^0-9]/g, '');
+    setLessonCode(`TOAN-${num}-HKI-SODAISO-C01-STT01`);
+    setSelectedCatalogLessonCode('');
+    // Clear old catalog cache for switch if different grade
+    if (catalogData && catalogData.grade !== newGrade) {
+      setCatalogData(null);
+      localStorage.removeItem('khdh_stored_catalog_v1');
+    }
+    handleExtractCatalog(false, newGrade);
+  };
+
+  const handleResetCatalogCache = () => {
+    localStorage.removeItem('khdh_stored_catalog_v1');
+    setCatalogData(null);
+    handleExtractCatalog(true, selectedGrade);
+  };
+
+  const handleExtractCatalog = async (
+    forceRefresh?: boolean | React.SyntheticEvent,
+    overrideGrade?: 'Lớp 9' | 'Lớp 8' | 'Lớp 7' | 'Lớp 6'
+  ) => {
     const isForce = typeof forceRefresh === 'boolean' ? forceRefresh : false;
+    const targetGrade = overrideGrade || selectedGrade;
     setExtractingCatalog(true);
     setError(null);
     try {
@@ -806,7 +851,7 @@ export default function Home() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          grade: 'Lớp 8',
+          grade: targetGrade,
           subject: 'Toán học',
           apiKeys: activeKeys,
           documentIds: activeDocIds,
