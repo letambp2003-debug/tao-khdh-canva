@@ -93,7 +93,7 @@ export class CatalogExtractorService {
    * BỘ QUÉT BẢNG THUẦN DỮ LIỆU NGUỒN (Pure Content Table Parser)
    * Quét trực tiếp 100% tất cả các hàng bài học từ tệp PL1 / PPCT nạp lên mà không áp đặt môn học
    */
-  public static parseLessonsFromSourceTables(docs: SourceDocument[]): {
+    public static parseLessonsFromSourceTables(docs: SourceDocument[]): {
     lessons: CatalogLessonItem[];
     detectedSubject: string;
     detectedGrade: string;
@@ -142,7 +142,7 @@ export class CatalogExtractorService {
           }
         }
 
-        // Quét các hàng bảng Markdown (chứa dấu phân cách |)
+        // 1. Quét các hàng bảng Markdown (chứa dấu phân cách |)
         if (line.includes('|')) {
           const cells = line
             .split('|')
@@ -231,6 +231,42 @@ export class CatalogExtractorService {
                 ppctRange,
                 weekRange,
                 keyObjectives: objectives.length > 0 ? objectives : [`Bám sát YCCĐ trong Phụ lục I (${doc.displayName})`],
+                sourceBasis: `${doc.documentType} (${doc.displayName})`,
+                matchedSources: [doc.documentType],
+              });
+            }
+          }
+        } else {
+          // 2. Quét dòng văn bản danh sách có định dạng (Bài X: ... hoặc STT. ...)
+          const textLineMatch = line.match(/^(?:Bài\s*(\d+)[:.]|(\d+)[.)])\s+([^()\n]+?)(?:\s*\((\d+)\s*tiết\))?$/i);
+          if (textLineMatch) {
+            const stt = parseInt(textLineMatch[1] || textLineMatch[2]);
+            const rawTitle = textLineMatch[3].trim();
+            const periods = parseInt(textLineMatch[4]) || 2;
+
+            if (rawTitle.length > 3 && !lessons.some((l) => l.stt === stt)) {
+              const subPrefix = this.getSubjectCodePrefix(detectedSubject || 'MH');
+              const cleanGradeNum = (detectedGrade || '9').replace(/[^0-9]/g, '') || '9';
+              const padStt = stt < 10 ? `0${stt}` : `${stt}`;
+              const lessonCode = `${subPrefix}-${cleanGradeNum}-HKI-C01-STT${padStt}`;
+
+              const cleanTitle = rawTitle.toLowerCase().startsWith('bài') ? rawTitle : `Bài ${stt}: ${rawTitle}`;
+              const endPpct = currentPpct + periods - 1;
+              const ppctRange = periods === 1 ? `Tiết ${currentPpct}` : `Tiết ${currentPpct}, ${Array.from({ length: periods - 1 }, (_, k) => currentPpct + 1 + k).join(', ')}`;
+              currentPpct = endPpct + 1;
+
+              lessons.push({
+                stt,
+                lessonCode,
+                lessonTitle: cleanTitle,
+                chapter: currentChapter,
+                strand: currentStrand,
+                grade: detectedGrade || 'Lớp 9',
+                term: 'Học kỳ I',
+                totalPeriods: periods,
+                ppctRange,
+                weekRange: `Tuần ${Math.ceil(stt / 2)}`,
+                keyObjectives: [`Bám sát YCCĐ trong Phụ lục I (${doc.displayName})`],
                 sourceBasis: `${doc.documentType} (${doc.displayName})`,
                 matchedSources: [doc.documentType],
               });

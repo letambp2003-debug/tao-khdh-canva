@@ -227,18 +227,12 @@ export default function Home() {
     } catch {}
   }, []);
 
-  // Fetch documents whenever the authenticated user changes
+    // Fetch documents and state whenever user changes or on app load
   useEffect(() => {
-    if (currentUser) {
-      const wsId = getUserWorkspaceId(currentUser);
-      fetchDocuments(wsId);
-      fetchTaskHistory(wsId);
-      fetchSavedCatalog(wsId);
-    } else {
-      setTaskHistory([]);
-      setDocuments([]);
-      setReadiness(null);
-    }
+    const wsId = getUserWorkspaceId(currentUser);
+    fetchDocuments(wsId);
+    fetchTaskHistory(wsId);
+    fetchSavedCatalog(wsId);
   }, [currentUser?.email]);
 
   // Initialize Google Identity Services (GIS)

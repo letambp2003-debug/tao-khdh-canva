@@ -39,6 +39,7 @@ export class DocumentParserService {
 
   /**
    * Trích xuất văn bản và cấu trúc bảng biểu từ file .docx (Unpack ZIP word/document.xml)
+   * Duy trì cấu trúc hàng bảng chuẩn 1 dòng Markdown (| col1 | col2 | ...)
    */
   public static extractDocxContent(buffer: Buffer): string | null {
     try {
@@ -83,14 +84,40 @@ export class DocumentParserService {
       }
 
       const xml = documentXmlBuffer.toString('utf8');
+      let processed = xml;
 
-      // Chuyển đổi bảng biểu và đoạn văn thành Markdown chuẩn
-      const text = xml
+      // Xử lý các khối Bảng (<w:tbl>) thành từng dòng Markdown hoàn chỉnh
+      processed = processed.replace(/<w:tbl\b[\s\S]*?<\/w:tbl>/gi, (tblXml) => {
+        const rows: string[] = [];
+        const trMatches = tblXml.match(/<w:tr\b[\s\S]*?<\/w:tr>/gi) || [];
+
+        for (const trXml of trMatches) {
+          const cells: string[] = [];
+          const tcMatches = trXml.match(/<w:tc\b[\s\S]*?<\/w:tc>/gi) || [];
+
+          for (const tcXml of tcMatches) {
+            const textPieces: string[] = [];
+            const tMatches = tcXml.match(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/gi) || [];
+            for (const t of tMatches) {
+              const innerText = t.replace(/<[^>]+>/g, '');
+              textPieces.push(innerText);
+            }
+            const cellText = textPieces.join('').replace(/\s+/g, ' ').trim();
+            cells.push(cellText);
+          }
+
+          if (cells.length > 0) {
+            rows.push(`| ${cells.join(' | ')} |`);
+          }
+        }
+
+        return '\n\n' + rows.join('\n') + '\n\n';
+      });
+
+      // Xử lý phần văn bản ngoài bảng
+      processed = processed
         .replace(/<w:br\b[^>]*\/>/gi, '\n')
         .replace(/<w:cr\b[^>]*\/>/gi, '\n')
-        .replace(/<\/w:tc>/gi, ' | ')
-        .replace(/<w:tr\b[^>]*>/gi, '\n| ')
-        .replace(/<\/w:tr>/gi, '\n')
         .replace(/<\/w:p>/gi, '\n')
         .replace(/<[^>]+>/g, '')
         .replace(/&lt;/g, '<')
@@ -98,12 +125,11 @@ export class DocumentParserService {
         .replace(/&amp;/g, '&')
         .replace(/&quot;/g, '"')
         .replace(/&apos;/g, "'")
-        .replace(/[ \t]{2,}/g, ' ')
-        .replace(/\n\s*\|\s*\n/g, '\n')
-        .replace(/\n{3,}/g, '\n\n')
+        .replace(/[ \t]+/g, ' ')
+        .replace(/\n\s*\n\s*\n/g, '\n\n')
         .trim();
 
-      return text;
+      return processed;
     } catch (err) {
       console.warn('Could not unpack docx xml:', err);
       return null;
@@ -125,7 +151,7 @@ export class DocumentParserService {
 
       if (ext === 'docx' || mimeType.includes('wordprocessingml')) {
         const docxText = this.extractDocxContent(buffer);
-        if (docxText && docxText.length > 50) {
+        if (docxText && docxText.length > 30) {
           extracted = docxText;
         }
       }
