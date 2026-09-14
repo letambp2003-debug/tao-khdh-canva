@@ -4,7 +4,7 @@ const nextConfig: NextConfig = {
   // output: 'standalone', // Bỏ comment khi build production
   experimental: {
     serverActions: {
-      bodySizeLimit: '2mb',
+      bodySizeLimit: '100mb',
     },
   },
   serverExternalPackages: ['docx', 'katex'],

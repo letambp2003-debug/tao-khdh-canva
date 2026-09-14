@@ -160,18 +160,21 @@ export class DocumentParserService {
         if (['txt', 'md', 'markdown', 'json', 'csv', 'tsv'].includes(ext) || mimeType.includes('text')) {
           extracted = buffer.toString('utf-8');
         } else {
-          const rawStr = buffer.toString('utf-8');
+          // Xử lý an toàn cho tệp nhị phân / PDF lớn mà không gây nghẽn bộ nhớ V8
+          const maxBytesToScan = Math.min(buffer.length, 6 * 1024 * 1024);
+          const rawStr = buffer.subarray(0, maxBytesToScan).toString('latin1');
           const cleanChars = rawStr.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, ' ');
           const matches = cleanChars.match(/[A-Za-zÀ-ỹ0-9\s.,;:?!/\-+=()\[\]{}%_]{4,}/g);
           if (matches && matches.length > 0) {
-            extracted = matches.join(' ').replace(/\s{2,}/g, ' ').trim();
+            extracted = matches.slice(0, 10000).join(' ').replace(/\s{2,}/g, ' ').trim();
           } else {
             extracted = `[Tài liệu ${fileName} (Định dạng: .${ext}, Dung lượng: ${(buffer.length / 1024).toFixed(1)} KB) đã sẵn sàng phục vụ làm căn cứ biên soạn KHDH.]`;
           }
         }
       }
 
-      const safeText = extracted.slice(0, 45000).trim();
+      // Hỗ trợ lưu trữ tài liệu SGK lớn lên đến 150.000 ký tự (thay vì 45.000)
+      const safeText = extracted.slice(0, 150000).trim();
       const lines = safeText.split('\n').filter((l) => l.trim().length > 0);
       const summary = lines.slice(0, 5).join(' | ').slice(0, 300) || `Tệp ${fileName} (${safeText.length} ký tự)`;
 

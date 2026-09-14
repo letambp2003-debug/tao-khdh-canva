@@ -1,3 +1,6 @@
+export const dynamic = 'force-dynamic';
+export const maxDuration = 120;
+
 import { NextRequest, NextResponse } from 'next/server';
 import { SourceDocumentService } from '@/services/documents/source-document.service';
 import { SourceDocumentType } from '@/types/source-document';

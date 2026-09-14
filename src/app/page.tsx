@@ -95,6 +95,34 @@ interface OutputData {
   source_readiness?: SourceReadinessReport;
 }
 
+
+/**
+ * Helper phân tích JSON an toàn: Không bao giờ ném lỗi Unexpected token 'R'
+ * nếu máy chủ trả về mã lỗi 413, 502, 504 hoặc văn bản thô
+ */
+async function parseSafeJson(res: Response): Promise<{ success: boolean; [key: string]: any }> {
+  const contentType = res.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    try {
+      return await res.json();
+    } catch {
+      // Fallback nếu JSON bị lỗi cú pháp
+    }
+  }
+
+  const rawText = await res.text().catch(() => '');
+  if (res.status === 413 || rawText.includes('Request Entity Too Large') || rawText.includes('bodySizeLimit')) {
+    throw new Error('Tệp tải lên quá lớn (vượt quá giới hạn máy chủ). Vui lòng chọn tệp nhỏ hơn hoặc nạp SGK theo từng Chương / Bài.');
+  }
+  if (res.status === 504 || res.status === 502) {
+    throw new Error('Máy chủ phản hồi chậm hoặc tạm thời quá tải (Gateway Timeout). Vui lòng thử lại sau giây lát.');
+  }
+  if (!res.ok) {
+    throw new Error(rawText ? `Lỗi máy chủ (${res.status}): ${rawText.slice(0, 180)}` : `Lỗi máy chủ (HTTP ${res.status})`);
+  }
+  return { success: true, message: rawText };
+}
+
 export default function Home() {
   // Authentication & User Vault State
   const [currentUser, setCurrentUser] = useState<UserSession | null>(null);
@@ -591,7 +619,7 @@ export default function Home() {
     try {
       const wsId = wsIdOverride || getUserWorkspaceId(currentUser);
       const res = await fetch(`/api/documents?projectId=${encodeURIComponent(wsId)}`);
-      const data = await res.json();
+      const data = await parseSafeJson(res);
       if (data.success) {
         setDocuments(data.documents || []);
         setReadiness(data.readiness || null);
@@ -671,7 +699,7 @@ export default function Home() {
         method: 'POST',
         body: formData,
       });
-      const data = await res.json();
+      const data = await parseSafeJson(res);
       if (!res.ok || !data.success) {
         throw new Error(data.message || 'Lỗi khi tải tài liệu');
       }
@@ -922,7 +950,7 @@ export default function Home() {
         }),
       });
 
-      const data = await res.json();
+      const data = await parseSafeJson(res);
       if (!res.ok || !data.success) {
         throw new Error(data.message || 'Không thể trích xuất danh mục bài học.');
       }
@@ -974,7 +1002,7 @@ export default function Home() {
         body: JSON.stringify(bodyPayload),
       });
 
-      const data = await res.json();
+      const data = await parseSafeJson(res);
       if (!res.ok || !data.success) {
         throw new Error(data.message || 'Không thể trích xuất danh mục bài học.');
       }
