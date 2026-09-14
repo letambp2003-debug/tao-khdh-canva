@@ -876,6 +876,25 @@ export default function Home() {
     handleExtractCatalog(true, selectedGrade, newSubject);
   };
 
+  const handleResetAllSystemData = async () => {
+    if (!confirm('Thầy/Cô có chắc chắn muốn XÓA SẠCH toàn bộ dữ liệu cũ, bộ nhớ đệm và đặt lại hệ thống từ đầu không?')) return;
+    try {
+      const wsId = getUserWorkspaceId(currentUser);
+      localStorage.removeItem('khdh_stored_catalog_v1');
+      setCatalogData(null);
+      setOutputData(null);
+      setDocuments([]);
+      setTaskHistory([]);
+      setReadiness(null);
+      await fetch('/api/extract-catalog?projectId=' + encodeURIComponent(wsId), { method: 'DELETE' });
+      await fetch('/api/task-history?clearAll=true&projectId=' + encodeURIComponent(wsId), { method: 'DELETE' });
+      await fetchDocuments(wsId);
+      alert('Đã xóa sạch toàn bộ dữ liệu đệm thành công! Hệ thống sẵn sàng với tệp mới của Thầy/Cô.');
+    } catch {
+      alert('Đã làm mới dữ liệu cục bộ.');
+    }
+  };
+
   const handleExtractCatalog = async (
     forceRefresh?: boolean | React.SyntheticEvent,
     overrideGrade?: 'Lớp 9' | 'Lớp 8' | 'Lớp 7' | 'Lớp 6',
