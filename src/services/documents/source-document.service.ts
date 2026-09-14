@@ -5,12 +5,21 @@ import { SourceDocument, SourceDocumentType, SourceReadinessReport } from '@/typ
 import { DocumentParserService } from './document-parser.service';
 import { SourceContextBuilder } from './source-context-builder';
 
+import fsSync from 'fs';
+
 function getStorageDir(): string {
   try {
-    const dir = process.env.STORAGE_DIR || path.join(os.tmpdir(), 'khdh-source-docs');
-    return dir;
+    const localDir = path.join(process.cwd(), 'data', 'source-documents');
+    if (!fsSync.existsSync(localDir)) {
+      fsSync.mkdirSync(localDir, { recursive: true });
+    }
+    return localDir;
   } catch {
-    return path.join(process.cwd(), 'data', 'source-documents');
+    const tmpDir = path.join(os.tmpdir(), 'khdh-source-docs');
+    if (!fsSync.existsSync(tmpDir)) {
+      fsSync.mkdirSync(tmpDir, { recursive: true });
+    }
+    return tmpDir;
   }
 }
 

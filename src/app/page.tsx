@@ -1,3 +1,4 @@
+import { TaskHistoryItem, TaskType } from '@/types/task-history.types';
 "use client";
 
 import React, { useState, useRef, useEffect } from 'react';
@@ -102,7 +103,14 @@ export default function Home() {
   const [khdhFormatMode, setKhdhFormatMode] = useState<'SPLIT_PERIODS' | 'CONTINUOUS_4SECTION'>('CONTINUOUS_4SECTION');
   const [lessonCode, setLessonCode] = useState('TOAN-8-HKI-SODAISO-C01-STT01');
   const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'draft' | 'preview' | 'worksheet' | 'game' | 'storyboard' | 'slide' | 'sources' | 'stats'>('draft');
+  const [activeTab, setActiveTab] = useState<'draft' | 'preview' | 'worksheet' | 'game' | 'storyboard' | 'slide' | 'sources' | 'history' | 'stats'>('draft');
+  const [taskHistory, setTaskHistory] = useState<TaskHistoryItem[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [taskHistoryQuery, setTaskHistoryQuery] = useState('');
+  const [taskHistoryTypeFilter, setTaskHistoryTypeFilter] = useState<string>('ALL');
+  const [showDriveSyncModal, setShowDriveSyncModal] = useState(false);
+  const [driveSyncing, setDriveSyncing] = useState(false);
+  const [driveSyncStatus, setDriveSyncStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [outputData, setOutputData] = useState<OutputData | null>(null);
   const [pipelineStep, setPipelineStep] = useState<string>('');
@@ -200,7 +208,9 @@ export default function Home() {
     if (currentUser) {
       const wsId = getUserWorkspaceId(currentUser);
       fetchDocuments(wsId);
+      fetchTaskHistory(wsId);
     } else {
+      setTaskHistory([]);
       setDocuments([]);
       setReadiness(null);
     }
@@ -377,6 +387,185 @@ export default function Home() {
   };
 
   const currentParsedKeys = ApiKeyService.parseKeys(rawKeysInput);
+
+  
+  const fetchTaskHistory = async (wsIdOverride?: string) => {
+    setLoadingHistory(true);
+    try {
+      const wsId = wsIdOverride || getUserWorkspaceId(currentUser);
+      const res = await fetch(`/api/task-history?projectId=${encodeURIComponent(wsId)}`);
+      const data = await res.json();
+      if (data.success) {
+        setTaskHistory(data.tasks || []);
+      }
+    } catch (err) {
+      console.error('Error fetching task history:', err);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  const handleRecordTaskHistory = async (
+    taskType: TaskType,
+    lessonCodeStr: string,
+    commandStr: string,
+    fullOutputStr: string,
+    formatModeStr?: 'SPLIT_PERIODS' | 'CONTINUOUS_4SECTION',
+    tokenUsageObj?: { inputTokens: number; outputTokens: number; totalTokens: number },
+    modelStr?: string,
+    durationMsNum?: number,
+    keyUsedStr?: string
+  ) => {
+    try {
+      const wsId = getUserWorkspaceId(currentUser);
+      await fetch('/api/task-history', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId: wsId,
+          userEmail: currentUser?.email,
+          taskType,
+          lessonCode: lessonCodeStr,
+          command: commandStr,
+          formatMode: formatModeStr,
+          fullOutput: fullOutputStr,
+          tokenUsage: tokenUsageObj,
+          modelUsed: modelStr,
+          durationMs: durationMsNum,
+          keyUsed: keyUsedStr,
+        }),
+      });
+      fetchTaskHistory(wsId);
+    } catch (err) {
+      console.warn('Could not record task history:', err);
+    }
+  };
+
+  const handleRerunTask = (task: TaskHistoryItem) => {
+    setLessonCode(task.lessonCode);
+    setCommand(task.command);
+    if (task.formatMode) {
+      setKhdhFormatMode(task.formatMode);
+    }
+    setActiveTab('draft');
+
+    if (task.taskType === 'SOAN_KHDH_V11' || task.taskType === 'SOAN_KHDH_TACH_TIET') {
+      handleSubmit(undefined, undefined, task.command, task.formatMode, task.lessonCode);
+    } else if (task.taskType === 'PHAN_TICH_BAI_HOC') {
+      handleAnalyzeLesson(task.lessonCode);
+    } else {
+      handleSubmit(undefined, undefined, task.command, task.formatMode, task.lessonCode);
+    }
+  };
+
+  const handleViewTaskResult = (task: TaskHistoryItem) => {
+    setOutputData({
+      status: 'OK',
+      job_id: task.id,
+      command: task.command,
+      format_mode: task.formatMode,
+      lesson_code: task.lessonCode,
+      khdh_draft: task.fullOutput,
+      token_usage: task.tokenUsage,
+      model: task.modelUsed,
+      duration_ms: task.durationMs,
+      key_used: task.keyUsed,
+    });
+
+    if (task.taskType === 'PHIEU_HOC_TAP') {
+      setWorksheetMarkdown(task.fullOutput);
+      setActiveTab('worksheet');
+    } else if (task.taskType === 'TRO_CHOI_GAME') {
+      setGameHtml(task.fullOutput);
+      setActiveTab('game');
+    } else {
+      setActiveTab('draft');
+    }
+  };
+
+  const handleDeleteTask = async (taskId: string) => {
+    try {
+      const wsId = getUserWorkspaceId(currentUser);
+      const res = await fetch(`/api/task-history?id=${encodeURIComponent(taskId)}&projectId=${encodeURIComponent(wsId)}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (data.success) {
+        setTaskHistory((prev) => prev.filter((t) => t.id !== taskId));
+      }
+    } catch (err) {
+      console.error('Error deleting task:', err);
+    }
+  };
+
+  const handleClearAllTasks = async () => {
+    if (!confirm('Thầy/Cô có chắc chắn muốn xóa toàn bộ lịch sử nhiệm vụ không?')) return;
+    try {
+      const wsId = getUserWorkspaceId(currentUser);
+      const res = await fetch(`/api/task-history?clearAll=true&projectId=${encodeURIComponent(wsId)}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (data.success) {
+        setTaskHistory([]);
+      }
+    } catch (err) {
+      console.error('Error clearing tasks:', err);
+    }
+  };
+
+  const handleDriveBackup = async () => {
+    setDriveSyncing(true);
+    setDriveSyncStatus(null);
+    try {
+      const wsId = getUserWorkspaceId(currentUser);
+      const res = await fetch('/api/drive/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clientProjectId: wsId,
+          userEmail: currentUser?.email,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setDriveSyncStatus(data.message || 'Sao lưu thành công!');
+      } else {
+        throw new Error(data.message || 'Lỗi khi sao lưu.');
+      }
+    } catch (err) {
+      setDriveSyncStatus('Lỗi: ' + ((err as Error)?.message || 'Không thể sao lưu'));
+    } finally {
+      setDriveSyncing(false);
+    }
+  };
+
+  const handleDownloadBackupJson = async () => {
+    try {
+      const wsId = getUserWorkspaceId(currentUser);
+      const res = await fetch('/api/drive/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientProjectId: wsId, userEmail: currentUser?.email }),
+      });
+      const data = await res.json();
+      if (data.backupPayload) {
+        const jsonStr = JSON.stringify(data.backupPayload, null, 2);
+        const blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `BACKUP_KHDH_${currentUser?.email ? currentUser.email.replace(/[^a-zA-Z0-9]/g, '_') : 'GUEST'}_${Date.now()}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+    } catch (e) {
+      alert('Lỗi tải tệp sao lưu: ' + (e as Error)?.message);
+    }
+  };
+
 
   const fetchDocuments = async (wsIdOverride?: string) => {
     setDocLoading(true);
@@ -822,6 +1011,17 @@ export default function Home() {
 
       setOutputData(data);
       setPipelineStep('Hoàn tất!');
+      handleRecordTaskHistory(
+        activeMode === 'CONTINUOUS_4SECTION' ? 'SOAN_KHDH_V11' : 'SOAN_KHDH_TACH_TIET',
+        activeLessonCode,
+        activeCmd,
+        data.khdh_draft,
+        activeMode,
+        data.token_usage,
+        data.model,
+        data.duration_ms,
+        data.key_used
+      );
       setActiveTab('draft');
     } catch (err: unknown) {
       const errorObj = err as { name?: string; message?: string };
@@ -949,6 +1149,17 @@ export default function Home() {
 
       setWorksheetMarkdown(data.markdown);
       setActiveTab('worksheet');
+      handleRecordTaskHistory(
+        'PHIEU_HOC_TAP',
+        outputData.lesson_code || 'PHT',
+        'TAO_PHIEU_HOC_TAP',
+        data.markdown,
+        khdhFormatMode,
+        data.tokenUsage,
+        'Gemini Flash',
+        undefined,
+        data.keyUsed
+      );
     } catch (err: unknown) {
       const msg = (err as Error)?.message || 'Lỗi khi tạo Phiếu học tập.';
       setError(msg);
@@ -1073,6 +1284,17 @@ export default function Home() {
 
       setStoryboardData(data.storyboard);
       setActiveTab('storyboard');
+      handleRecordTaskHistory(
+        'KICH_BAN_VIDEO',
+        outputData.lesson_code || 'VIDEO',
+        'XUAT_KICH_BAN_VIDEO',
+        data.storyboardMarkdown || JSON.stringify(data.storyboard, null, 2),
+        khdhFormatMode,
+        data.tokenUsage,
+        'Gemini Flash',
+        undefined,
+        data.keyUsed
+      );
     } catch (err: unknown) {
       const msg = (err as Error)?.message || 'Lỗi khi tạo Kịch bản Video.';
       setError(msg);
@@ -1538,6 +1760,13 @@ export default function Home() {
               className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1"
             >
               <span>+</span> Thêm tài liệu khác
+            </button>
+            <button
+              onClick={() => setShowDriveSyncModal(true)}
+              className="px-3.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-900 border border-blue-300 rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1.5"
+            >
+              <span>☁️</span>
+              <span>Sao Lưu Google Drive</span>
             </button>
             <button
               onClick={handleExtractCatalog}
@@ -2177,6 +2406,7 @@ export default function Home() {
                 { id: 'storyboard', label: '🎬 Kịch Bản Video AI' },
                 { id: 'slide', label: '📊 Slide & Canva' },
                 { id: 'sources', label: '📚 Nguồn Sử Dụng' },
+                { id: 'history', label: `📜 Lịch Sử (${taskHistory.length})` },
                 { id: 'stats', label: '📈 Thống Kê & Key' },
               ].map((tab) => (
                 <button
@@ -2205,13 +2435,236 @@ export default function Home() {
                 </div>
               )}
 
-              {!loading && !outputData && (
+              {!loading && !outputData && activeTab !== 'history' && (
                 <div className="h-64 flex flex-col items-center justify-center text-slate-400 text-center space-y-2">
                   <span className="text-4xl">📋</span>
                   <p className="font-medium text-sm text-slate-600">Chưa có dữ liệu giáo án.</p>
                   <p className="text-xs text-slate-400">Chọn lệnh và nhấn &quot;Thực Thi Ngay&quot; để tạo Kế hoạch bài dạy.</p>
                 </div>
               )}
+              
+              {!loading && activeTab === 'history' && (
+                
+                  
+                    <div className="space-y-4">
+                      {/* Header & Controls */}
+                      <div className="p-4 bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white rounded-2xl shadow-sm space-y-3">
+                        <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="px-2 py-0.5 bg-blue-600 text-white font-black text-[10px] uppercase tracking-wider rounded-md">
+                                WATERTIGHT PER-USER ISOLATION
+                              </span>
+                              <h3 className="text-sm font-black text-white flex items-center gap-1.5">
+                                <span>📜</span> LỊCH SỬ NHIỆM VỤ ĐÃ THỰC HIỆN ({taskHistory.length} nhiệm vụ)
+                              </h3>
+                            </div>
+                            <p className="text-xs text-slate-300 mt-1">
+                              Không gian riêng của <strong>{currentUser?.name || currentUser?.email || 'Thầy/Cô'}</strong>. Bấm <strong>&quot;Thực Hiện Lại&quot;</strong> để làm lại bài cũ với 1 chạm hoặc <strong>&quot;Xem Lại&quot;</strong> kết quả đã tạo không tốn thêm token AI.
+                            </p>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => fetchTaskHistory()}
+                              disabled={loadingHistory}
+                              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold transition-all border border-slate-700 flex items-center gap-1"
+                            >
+                              <span>🔄</span> Làm mới
+                            </button>
+                            {taskHistory.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={handleClearAllTasks}
+                                className="px-3 py-1.5 bg-rose-900/60 hover:bg-rose-800 text-rose-200 rounded-xl text-xs font-bold transition-all border border-rose-700 flex items-center gap-1"
+                              >
+                                <span>🗑️</span> Xóa toàn bộ
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Search & Filter Bar */}
+                        <div className="pt-2 border-t border-slate-800 flex flex-col sm:flex-row items-center gap-2">
+                          <div className="relative flex-1 w-full">
+                            <input
+                              type="text"
+                              value={taskHistoryQuery}
+                              onChange={(e) => setTaskHistoryQuery(e.target.value)}
+                              placeholder="🔍 Tìm theo mã bài học, tên bài, lệnh thực thi..."
+                              className="w-full bg-slate-800 text-white px-3 py-1.5 rounded-lg border border-slate-700 text-xs focus:ring-1 focus:ring-blue-400 outline-hidden"
+                            />
+                            {taskHistoryQuery && (
+                              <button
+                                onClick={() => setTaskHistoryQuery('')}
+                                className="absolute right-2 top-1.5 text-slate-400 hover:text-white text-xs"
+                              >
+                                ✕
+                              </button>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-1 overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0">
+                            {[
+                              { id: 'ALL', label: 'Tất cả' },
+                              { id: 'SOAN_KHDH_V11', label: 'V11-2' },
+                              { id: 'SOAN_KHDH_TACH_TIET', label: 'Tách tiết' },
+                              { id: 'PHAN_TICH_BAI_HOC', label: 'Phân tích' },
+                              { id: 'PHIEU_HOC_TAP', label: 'Phiếu học tập' },
+                              { id: 'TRO_CHOI_GAME', label: 'Game' },
+                              { id: 'KICH_BAN_VIDEO', label: 'Video 8s' },
+                            ].map((f) => (
+                              <button
+                                key={f.id}
+                                onClick={() => setTaskHistoryTypeFilter(f.id)}
+                                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all border whitespace-nowrap ${
+                                  taskHistoryTypeFilter === f.id
+                                    ? 'bg-blue-600 text-white border-blue-500'
+                                    : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+                                }`}
+                              >
+                                {f.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Loading State */}
+                      {loadingHistory && (
+                        <div className="p-8 text-center text-xs text-slate-500">
+                          <span className="animate-spin inline-block w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full mr-2" />
+                          Đang tải lịch sử nhiệm vụ...
+                        </div>
+                      )}
+
+                      {/* Empty State */}
+                      {!loadingHistory && taskHistory.length === 0 && (
+                        <div className="p-12 text-center bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200 space-y-3">
+                          <span className="text-4xl">📜</span>
+                          <h4 className="font-bold text-slate-800 text-sm">Chưa có lịch sử nhiệm vụ</h4>
+                          <p className="text-xs text-slate-500 max-w-md mx-auto">
+                            Khi Thầy/Cô thực hiện các lệnh soạn KHDH, phân tích bài học, tạo phiếu học tập hay làm video, lịch sử sẽ tự động được ghi nhận tại đây để xem lại hoặc thực hiện lại bất kỳ lúc nào.
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Task History Cards List */}
+                      {!loadingHistory && taskHistory.length > 0 && (
+                        <div className="space-y-3">
+                          {taskHistory
+                            .filter((t) => {
+                              if (taskHistoryTypeFilter !== 'ALL' && t.taskType !== taskHistoryTypeFilter) {
+                                return false;
+                              }
+                              if (!taskHistoryQuery.trim()) return true;
+                              const q = taskHistoryQuery.toLowerCase();
+                              return (
+                                t.lessonCode.toLowerCase().includes(q) ||
+                                (t.lessonTitle && t.lessonTitle.toLowerCase().includes(q)) ||
+                                t.taskLabel.toLowerCase().includes(q) ||
+                                t.command.toLowerCase().includes(q)
+                              );
+                            })
+                            .map((task) => {
+                              const timeStr = new Date(task.createdAt).toLocaleString('vi-VN');
+                              return (
+                                <div
+                                  key={task.id}
+                                  className="p-4 bg-white border border-slate-200 rounded-2xl shadow-xs hover:border-blue-300 transition-all space-y-3"
+                                >
+                                  {/* Card Header */}
+                                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
+                                    <div className="flex items-center gap-2">
+                                      <span
+                                        className={`px-2.5 py-1 rounded-lg text-xs font-bold shadow-2xs ${
+                                          task.taskType === 'SOAN_KHDH_V11'
+                                            ? 'bg-emerald-600 text-white'
+                                            : task.taskType === 'SOAN_KHDH_TACH_TIET'
+                                            ? 'bg-blue-600 text-white'
+                                            : task.taskType === 'PHAN_TICH_BAI_HOC'
+                                            ? 'bg-purple-600 text-white'
+                                            : task.taskType === 'PHIEU_HOC_TAP'
+                                            ? 'bg-teal-600 text-white'
+                                            : task.taskType === 'TRO_CHOI_GAME'
+                                            ? 'bg-indigo-600 text-white'
+                                            : 'bg-purple-700 text-white'
+                                        }`}
+                                      >
+                                        {task.taskLabel}
+                                      </span>
+                                      <span className="font-mono text-xs font-bold text-slate-800">
+                                        {task.lessonCode}
+                                      </span>
+                                    </div>
+
+                                    <div className="flex items-center gap-2 text-xs text-slate-500">
+                                      <span>⏱️ {timeStr}</span>
+                                      {task.tokenUsage && (
+                                        <span className="bg-slate-100 px-1.5 py-0.5 rounded text-[10px] font-bold text-slate-700">
+                                          {task.tokenUsage.totalTokens} tokens
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {/* Snippet preview */}
+                                  <p className="text-xs text-slate-600 leading-relaxed font-mono bg-slate-50 p-2.5 rounded-xl border border-slate-100 line-clamp-2">
+                                    {task.resultSnippet}
+                                  </p>
+
+                                  {/* Actions Bar */}
+                                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                                    <div className="flex items-center gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleRerunTask(task)}
+                                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold shadow-2xs transition-all flex items-center gap-1"
+                                      >
+                                        <span>🔄</span>
+                                        <span>Thực Hiện Lại (Rerun)</span>
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        onClick={() => handleViewTaskResult(task)}
+                                        className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg text-xs font-bold border border-slate-300 transition-all flex items-center gap-1"
+                                      >
+                                        <span>👁️</span>
+                                        <span>Xem Lại Kết Quả</span>
+                                      </button>
+                                    </div>
+
+                                    <div className="flex items-center gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          navigator.clipboard.writeText(task.fullOutput);
+                                          alert('Đã sao chép nội dung kết quả!');
+                                        }}
+                                        className="px-2.5 py-1 text-slate-600 hover:text-slate-900 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg text-xs font-medium transition-all flex items-center gap-1"
+                                      >
+                                        <span>📋</span>
+                                        <span>Copy</span>
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteTask(task.id)}
+                                        className="px-2 py-1 text-rose-600 hover:text-rose-800 hover:bg-rose-50 border border-transparent hover:border-rose-200 rounded-lg text-xs font-bold transition-all"
+                                      >
+                                        ✕
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                        </div>
+                      )}
+                    </div>
+                  )}
 
               {!loading && outputData && (
                 <>
@@ -4082,6 +4535,100 @@ export default function Home() {
           </div>
         </div>
       )}
+
+      {/* Google Drive Backup & Sync Modal */}
+      {showDriveSyncModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white max-w-lg w-full rounded-2xl p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-start border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
+                  <span>☁️</span> SAO LƯU &amp; ĐỒNG BỘ GOOGLE DRIVE CÁ NHÂN
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Lưu trữ vĩnh viễn tài liệu nguồn và lịch sử nhiệm vụ theo tài khoản Gmail của Thầy/Cô
+                </p>
+              </div>
+              <button
+                onClick={() => setShowDriveSyncModal(false)}
+                className="text-slate-400 hover:text-slate-600 font-bold text-lg p-1 leading-none"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs text-slate-700">
+              <div className="p-3.5 bg-blue-50/80 border border-blue-200 rounded-xl space-y-1.5">
+                <div className="font-bold text-blue-950 flex items-center gap-1.5">
+                  <span>🔒</span> Không gian lưu trữ riêng biệt:
+                </div>
+                <div className="text-blue-900">
+                  - <strong>Tài khoản Gmail:</strong> {currentUser?.email || 'Chưa đăng nhập'}
+                </div>
+                <div className="text-blue-900">
+                  - <strong>Tài liệu nguồn đã nạp:</strong> {documents.length} tệp ({documents.filter((d) => d.isActive).length} tệp đang kích hoạt)
+                </div>
+                <div className="text-blue-900">
+                  - <strong>Nhiệm vụ đã thực thi:</strong> {taskHistory.length} tác vụ đã lưu
+                </div>
+              </div>
+
+              {driveSyncStatus && (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-900 font-semibold text-xs flex items-center gap-2">
+                  <span>✅</span>
+                  <span>{driveSyncStatus}</span>
+                </div>
+              )}
+
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                <div className="font-bold text-slate-800">💡 Các tùy chọn sao lưu &amp; kết nối:</div>
+                <p className="text-slate-600 leading-relaxed">
+                  Hệ thống tự động bảo vệ dữ liệu theo nguyên tắc <strong>mail nào biết mail đó</strong>, tuyệt đối không bị lẫn lộn giữa các tài khoản giáo viên khác nhau.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-center justify-between border-t border-slate-100 pt-4 gap-2">
+              <button
+                type="button"
+                onClick={handleDownloadBackupJson}
+                className="w-full sm:w-auto px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded-xl text-xs border border-slate-300 transition-all flex items-center justify-center gap-1.5"
+              >
+                <span>📥</span> Tải Gói Dữ Liệu Offline (.json)
+              </button>
+
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <button
+                  type="button"
+                  onClick={() => setShowDriveSyncModal(false)}
+                  className="flex-1 sm:flex-none px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
+                >
+                  Đóng
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDriveBackup}
+                  disabled={driveSyncing}
+                  className="flex-1 sm:flex-none px-4 py-2 bg-blue-700 hover:bg-blue-800 text-white font-bold rounded-xl text-xs shadow-sm transition-all flex items-center justify-center gap-1.5"
+                >
+                  {driveSyncing ? (
+                    <>
+                      <span className="animate-spin inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full" />
+                      <span>Đang đồng bộ...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>☁️</span>
+                      <span>Đồng Bộ Ngay</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
     </main>
   );
 }
