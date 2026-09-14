@@ -103,7 +103,7 @@ export default function Home() {
   const [khdhFormatMode, setKhdhFormatMode] = useState<'SPLIT_PERIODS' | 'CONTINUOUS_4SECTION'>('CONTINUOUS_4SECTION');
   const [lessonCode, setLessonCode] = useState('TOAN-8-HKI-SODAISO-C01-STT01');
   const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'draft' | 'preview' | 'worksheet' | 'game' | 'storyboard' | 'slide' | 'sources' | 'history' | 'stats'>('draft');
+  const [activeTab, setActiveTab] = useState<'draft' | 'preview' | 'catalog' | 'worksheet' | 'game' | 'storyboard' | 'slide' | 'sources' | 'history' | 'stats'>('draft');
   const [taskHistory, setTaskHistory] = useState<TaskHistoryItem[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [taskHistoryQuery, setTaskHistoryQuery] = useState('');
@@ -184,6 +184,23 @@ export default function Home() {
     return 'usr_' + user.email.toLowerCase().trim().replace(/[^a-z0-9]/g, '_');
   };
 
+
+  const fetchSavedCatalog = async (wsIdOverride?: string) => {
+    try {
+      const wsId = wsIdOverride || getUserWorkspaceId(currentUser);
+      const res = await fetch(`/api/extract-catalog?projectId=${encodeURIComponent(wsId)}`);
+      const data = await res.json();
+      if (data.success && data.catalog) {
+        setCatalogData(data.catalog);
+        try {
+          localStorage.setItem('khdh_stored_catalog_v1', JSON.stringify(data.catalog));
+        } catch {}
+      }
+    } catch (err) {
+      console.warn('Error fetching saved catalog:', err);
+    }
+  };
+
   // Check session and load documents on mount
   useEffect(() => {
     checkUserSession();
@@ -209,6 +226,7 @@ export default function Home() {
       const wsId = getUserWorkspaceId(currentUser);
       fetchDocuments(wsId);
       fetchTaskHistory(wsId);
+      fetchSavedCatalog(wsId);
     } else {
       setTaskHistory([]);
       setDocuments([]);
@@ -775,7 +793,8 @@ export default function Home() {
     }
   };
 
-  const handleExtractCatalog = async () => {
+  const handleExtractCatalog = async (forceRefresh?: boolean | React.SyntheticEvent) => {
+    const isForce = typeof forceRefresh === 'boolean' ? forceRefresh : false;
     setExtractingCatalog(true);
     setError(null);
     try {
@@ -792,6 +811,7 @@ export default function Home() {
           apiKeys: activeKeys,
           documentIds: activeDocIds,
           projectId: wsId,
+          forceRefresh: isForce,
         }),
       });
 
@@ -1653,6 +1673,30 @@ export default function Home() {
             </div>
           )}
 
+          
+          {/* Quick Open Catalog Button */}
+          <button
+            type="button"
+            onClick={() => {
+              if (catalogData) {
+                setActiveTab('catalog');
+              } else {
+                handleExtractCatalog();
+              }
+            }}
+            disabled={extractingCatalog}
+            className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold border transition-all shadow-xs bg-gradient-to-r from-purple-50 to-indigo-50 text-purple-900 border-purple-300 hover:from-purple-100 hover:to-indigo-100"
+            title="Mở nhanh Danh mục bài học & Ma trận PPCT bám sát PL1, PPCT, SGK, KHDH cũ"
+          >
+            <span>📑</span>
+            <span>
+              {extractingCatalog ? 'Đang trích xuất...' : catalogData ? `Danh Mục (${catalogData.totalLessons} bài)` : 'Mở Danh Mục'}
+            </span>
+            <span className="text-[10px] bg-purple-700 text-white px-1.5 py-0.5 rounded-md font-bold">
+              PL1/PPCT
+            </span>
+          </button>
+
           <button
             onClick={() => setShowSettings(true)}
             className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold border transition-all shadow-xs ${
@@ -2401,6 +2445,7 @@ export default function Home() {
               {[
                 { id: 'draft', label: '📝 Bản Thảo KHDH' },
                 { id: 'preview', label: '📐 Xem Trước 2 Cột' },
+                { id: 'catalog', label: `📑 Danh Mục (${catalogData?.totalLessons || catalogData?.lessons?.length || 0})` },
                 { id: 'worksheet', label: '📋 Phiếu Học Tập' },
                 { id: 'game', label: '🎮 Trò Chơi HTML' },
                 { id: 'storyboard', label: '🎬 Kịch Bản Video AI' },
@@ -2411,7 +2456,7 @@ export default function Home() {
               ].map((tab) => (
                 <button
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id as 'draft' | 'preview' | 'worksheet' | 'game' | 'storyboard' | 'slide' | 'sources' | 'stats')}
+                  onClick={() => setActiveTab(tab.id as 'draft' | 'preview' | 'catalog' | 'worksheet' | 'game' | 'storyboard' | 'slide' | 'sources' | 'history' | 'stats')}
                   className={`flex-1 min-w-[110px] py-2 px-2.5 rounded-lg text-xs font-bold transition-all ${
                     activeTab === tab.id
                       ? 'bg-white text-blue-700 shadow-sm'
@@ -2435,7 +2480,7 @@ export default function Home() {
                 </div>
               )}
 
-              {!loading && !outputData && activeTab !== 'history' && (
+              {!loading && !outputData && activeTab !== 'history' && activeTab !== 'catalog' && (
                 <div className="h-64 flex flex-col items-center justify-center text-slate-400 text-center space-y-2">
                   <span className="text-4xl">📋</span>
                   <p className="font-medium text-sm text-slate-600">Chưa có dữ liệu giáo án.</p>
@@ -2443,6 +2488,274 @@ export default function Home() {
                 </div>
               )}
               
+
+              {/* TAB 3: CURRICULUM CATALOG (DANH MỤC BÀI HỌC) */}
+              {!loading && activeTab === 'catalog' && (
+                <div className="space-y-4">
+                  {/* Catalog Header & Controls */}
+                  <div className="p-4 bg-gradient-to-r from-purple-950 via-indigo-950 to-slate-900 text-white rounded-2xl shadow-sm space-y-3 border border-purple-800/40">
+                    <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3">
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="px-2 py-0.5 bg-purple-600 text-white font-black text-[10px] uppercase tracking-wider rounded-md">
+                            4-SOURCE STRICT PROTOCOL
+                          </span>
+                          <h3 className="text-sm font-black text-white flex items-center gap-1.5">
+                            <span>📑</span> DANH MỤC BÀI HỌC &amp; MA TRẬN PHÂN PHỐI CHƯƠNG TRÌNH
+                          </h3>
+                        </div>
+                        <p className="text-xs text-purple-200 mt-1">
+                          Trích xuất và đối chiếu bám sát: <strong>⭐ Phụ lục I</strong>, <strong>📘 PPCT</strong>, <strong>📗 SGK</strong> và <strong>📙 KHDH cũ</strong>. Bấm nút để soạn KHDH, làm phiếu hoặc phân tích YCCĐ chỉ với 1 chạm.
+                        </p>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleExtractCatalog(true)}
+                          disabled={extractingCatalog}
+                          className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1 border border-purple-400"
+                        >
+                          {extractingCatalog ? (
+                            <>
+                              <span className="animate-spin inline-block w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full" />
+                              <span>Đang trích xuất lại...</span>
+                            </>
+                          ) : (
+                            <>
+                              <span>🔄</span>
+                              <span>Trích xuất lại từ nguồn</span>
+                            </>
+                          )}
+                        </button>
+                        {catalogData && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={handleCopyCatalogMarkdown}
+                              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold transition-all border border-slate-700 flex items-center gap-1"
+                            >
+                              <span>📋</span> Sao chép bảng
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleDownloadCatalog}
+                              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold transition-all border border-slate-700 flex items-center gap-1"
+                            >
+                              <span>⬇️</span> Tải .MD
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Source Badges Summary */}
+                    {catalogData && (
+                      <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-purple-900/60 text-xs">
+                        <span className="bg-purple-900/80 text-purple-200 px-2.5 py-0.5 rounded-full font-bold border border-purple-700">
+                          Môn: {catalogData.subject} {catalogData.grade}
+                        </span>
+                        <span className="bg-emerald-950 text-emerald-300 px-2.5 py-0.5 rounded-full font-bold border border-emerald-800">
+                          Tổng: {catalogData.totalLessons} bài ({catalogData.totalPeriods} tiết)
+                        </span>
+                        <span className="text-purple-300 text-[11px] italic">
+                          Căn cứ: {catalogData.sourceSummary}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Search & Filter */}
+                    <div className="pt-2 border-t border-purple-900/60 flex flex-col sm:flex-row items-center gap-2">
+                      <div className="relative flex-1 w-full">
+                        <input
+                          type="text"
+                          value={catalogSearchQuery}
+                          onChange={(e) => setCatalogSearchQuery(e.target.value)}
+                          placeholder="🔍 Tìm theo mã bài học, tên bài, chương, mạch kiến thức..."
+                          className="w-full bg-slate-900 text-white px-3 py-1.5 rounded-lg border border-purple-800 text-xs focus:ring-1 focus:ring-purple-400 outline-hidden"
+                        />
+                        {catalogSearchQuery && (
+                          <button
+                            onClick={() => setCatalogSearchQuery('')}
+                            className="absolute right-2 top-1.5 text-purple-400 hover:text-white text-xs"
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-1 overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0">
+                        {(['ALL', 'Học kỳ I', 'Học kỳ II'] as const).map((term) => (
+                          <button
+                            key={term}
+                            onClick={() => setCatalogTermFilter(term)}
+                            className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all border whitespace-nowrap ${
+                              catalogTermFilter === term
+                                ? 'bg-purple-600 text-white border-purple-500'
+                                : 'bg-slate-900 text-slate-300 border-purple-900 hover:bg-purple-900/60'
+                            }`}
+                          >
+                            {term === 'ALL' ? 'Tất cả học kỳ' : term}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Extracting Loading State */}
+                  {extractingCatalog && (
+                    <div className="p-8 text-center text-xs text-purple-700 bg-purple-50 rounded-2xl border border-purple-200">
+                      <span className="animate-spin inline-block w-5 h-5 border-2 border-purple-600 border-t-transparent rounded-full mr-2" />
+                      Đang phân tích và trích xuất danh mục từ Phụ lục I, PPCT, SGK và KHDH cũ...
+                    </div>
+                  )}
+
+                  {/* Empty Catalog State */}
+                  {!extractingCatalog && (!catalogData || !catalogData.lessons || catalogData.lessons.length === 0) && (
+                    <div className="p-12 text-center bg-purple-50/50 rounded-2xl border-2 border-dashed border-purple-200 space-y-3">
+                      <span className="text-4xl">📑</span>
+                      <h4 className="font-bold text-slate-800 text-sm">Chưa có danh mục bài học</h4>
+                      <p className="text-xs text-slate-600 max-w-md mx-auto">
+                        Hệ thống sẽ tự động quét tài liệu nguồn (Phụ lục I, PPCT, SGK) của Thầy/Cô để lập ma trận danh mục bài học đầy đủ kèm dải tiết và tuần học.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => handleExtractCatalog(true)}
+                        className="px-4 py-2 bg-purple-700 hover:bg-purple-800 text-white rounded-xl text-xs font-bold transition-all shadow-xs"
+                      >
+                        ⚡ Trích xuất Danh mục ngay
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Catalog Table */}
+                  {!extractingCatalog && catalogData && catalogData.lessons && catalogData.lessons.length > 0 && (
+                    <div className="overflow-x-auto border border-slate-200 rounded-2xl shadow-xs bg-white">
+                      <table className="w-full text-left text-xs border-collapse">
+                        <thead className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
+                          <tr>
+                            <th className="p-3 text-center w-12">STT</th>
+                            <th className="p-3 min-w-[240px]">Mã &amp; Tên bài học chuẩn</th>
+                            <th className="p-3 min-w-[170px]">Chương / Mạch</th>
+                            <th className="p-3 text-center w-16">Số tiết</th>
+                            <th className="p-3 text-center w-24">Tiết PPCT</th>
+                            <th className="p-3 text-center w-20">Tuần</th>
+                            <th className="p-3 text-center min-w-[130px]">Căn cứ nguồn</th>
+                            <th className="p-3 text-center min-w-[210px]">Thực thi nhanh</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 bg-white">
+                          {catalogData.lessons
+                            .filter((l) => {
+                              if (catalogTermFilter !== 'ALL' && l.term && !l.term.includes(catalogTermFilter)) {
+                                return false;
+                              }
+                              if (!catalogSearchQuery.trim()) return true;
+                              const q = catalogSearchQuery.toLowerCase();
+                              return (
+                                l.lessonTitle.toLowerCase().includes(q) ||
+                                l.lessonCode.toLowerCase().includes(q) ||
+                                (l.chapter && l.chapter.toLowerCase().includes(q)) ||
+                                (l.strand && l.strand.toLowerCase().includes(q))
+                              );
+                            })
+                            .map((lesson, idx) => (
+                              <tr key={idx} className="hover:bg-purple-50/40 transition-colors">
+                                <td className="p-3 text-center font-bold text-slate-500">
+                                  {lesson.stt || idx + 1}
+                                </td>
+                                <td className="p-3">
+                                  <div className="font-bold text-slate-900 leading-snug">
+                                    {lesson.lessonTitle}
+                                  </div>
+                                  <div className="flex items-center gap-1.5 mt-1">
+                                    <code className="bg-slate-100 text-blue-700 font-mono text-[10px] px-1.5 py-0.5 rounded font-bold border border-slate-200">
+                                      {lesson.lessonCode}
+                                    </code>
+                                    {lesson.term && (
+                                      <span className="text-[10px] text-slate-500 font-medium">
+                                        • {lesson.term}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {lesson.keyObjectives && lesson.keyObjectives.length > 0 && (
+                                    <div className="text-[10px] text-slate-500 mt-1 line-clamp-1">
+                                      🎯 YCCĐ: {lesson.keyObjectives.join('; ')}
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="p-3 text-slate-700">
+                                  {lesson.strand && (
+                                    <span className="inline-block bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded text-[10px] font-semibold mr-1 mb-0.5 border border-slate-200">
+                                      {lesson.strand}
+                                    </span>
+                                  )}
+                                  <div className="text-[11px] font-medium text-slate-600">
+                                    {lesson.chapter || 'Theo phân phối chuẩn'}
+                                  </div>
+                                </td>
+                                <td className="p-3 text-center">
+                                  <span className="bg-amber-100 text-amber-900 font-bold px-2 py-0.5 rounded-full text-[11px] border border-amber-300">
+                                    {lesson.totalPeriods}t
+                                  </span>
+                                </td>
+                                <td className="p-3 text-center text-[11px] font-bold text-blue-800">
+                                  {lesson.ppctRange || `Tiết ${lesson.stt || idx + 1}`}
+                                </td>
+                                <td className="p-3 text-center text-[11px] font-medium text-slate-600">
+                                  {lesson.weekRange || `Tuần ${Math.ceil((lesson.stt || idx + 1) / 2)}`}
+                                </td>
+                                <td className="p-3 text-center">
+                                  <span className="bg-purple-100 text-purple-900 text-[10px] font-bold px-2 py-0.5 rounded-md border border-purple-200 whitespace-nowrap">
+                                    {lesson.sourceBasis || 'PL1 & PPCT'}
+                                  </span>
+                                </td>
+                                <td className="p-3 text-center">
+                                  <div className="flex flex-wrap items-center justify-center gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSelectCatalogLesson(lesson, 'CONTINUOUS_4SECTION')}
+                                      title="Soạn KHDH V11-2 4 phần không tách tiết"
+                                      className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-[11px] font-bold shadow-2xs transition-all flex items-center gap-1"
+                                    >
+                                      <span>⚡</span>
+                                      <span>V11-2</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSelectCatalogLesson(lesson, 'SPLIT_PERIODS')}
+                                      title="Soạn KHDH tách tiết PPCT"
+                                      className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-[11px] font-bold shadow-2xs transition-all flex items-center gap-1"
+                                    >
+                                      <span>✂️</span>
+                                      <span>Tách tiết</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const code = lesson.lessonCode
+                                          ? `${lesson.lessonCode} (${lesson.lessonTitle} - ${lesson.totalPeriods} tiết)`
+                                          : lesson.lessonTitle;
+                                        setLessonCode(code);
+                                        handleAnalyzeLesson(code);
+                                      }}
+                                      title="Phân tích YCCĐ & Năng lực bài này"
+                                      className="px-2 py-1 bg-purple-100 hover:bg-purple-200 text-purple-900 border border-purple-300 rounded-md text-[11px] font-semibold transition-all flex items-center gap-1"
+                                    >
+                                      <span>🔍</span>
+                                      <span>Phân tích</span>
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {!loading && activeTab === 'history' && (
                 
                   

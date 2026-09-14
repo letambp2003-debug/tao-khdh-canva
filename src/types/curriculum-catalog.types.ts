@@ -15,6 +15,8 @@ export interface CatalogLessonItem {
   weekRange?: string;           // e.g. Tuần 1
   keyObjectives?: string[];     // e.g. ["Nhận biết đơn thức, đa thức", "Tính giá trị đa thức"]
   sourceBook?: string;          // e.g. Cánh Diều / Kết Nối Tri Thức / Chân Trời Sáng Tạo
+  sourceBasis?: string;         // e.g. "PL1 + PPCT + SGK" | "Phụ lục I & PPCT hiện hành"
+  matchedSources?: string[];    // e.g. ["PL1", "PPCT", "SGK", "KHDH_OLD"]
 }
 
 export interface CurriculumCatalog {
@@ -24,6 +26,16 @@ export interface CurriculumCatalog {
   sourceSummary: string;
   totalLessons: number;
   totalPeriods: number;
+  sourcesUsed?: {
+    hasPL1: boolean;
+    hasPPCT: boolean;
+    hasSGK: boolean;
+    hasKhdhOld: boolean;
+    hasOther: boolean;
+    docCount: number;
+    docNames: string[];
+  };
+  extractedAt?: string;
   lessons: CatalogLessonItem[];
 }
 
@@ -34,6 +46,7 @@ export interface ExtractCatalogRequest {
   apiKeys?: string[];
   documentIds?: string[];
   projectId?: string;
+  forceRefresh?: boolean;
 }
 
 export interface ExtractCatalogResponse {
@@ -42,4 +55,5 @@ export interface ExtractCatalogResponse {
   markdownSummary?: string;
   message?: string;
   keyUsed?: string;
+  isCached?: boolean;
 }
