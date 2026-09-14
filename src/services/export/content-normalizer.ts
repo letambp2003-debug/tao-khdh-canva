@@ -14,26 +14,57 @@ export class ContentNormalizer {
 
   /**
    * Loại bỏ các khối JSON / AgentMessage / YAML / Metadata râu ria ở đầu văn bản
+   * ĐẢM BẢO TUYỆT ĐỐI KHÔNG XÓA NHẦM MỤC "I. MỤC TIÊU" VÀ CÁC NỘI DUNG GIỮA DẤU PHÂN CÁCH "---"
    */
   public static cleanMetadata(markdown: string): string {
     if (!markdown) return '';
     let text = markdown.trim();
 
     // 1. Unwrap whole markdown wrapper ```markdown ... ```
-    text = text.replace(/^```(?:markdown|md)\s*\n([\s\S]*?)\n```\s*$/i, '$1');
+    text = text.replace(/^\`\`\`(?:markdown|md)\s*\n([\s\S]*?)\n\`\`\`\s*$/i, '$1');
 
     // 2. Loại bỏ khối code JSON ở đầu (ví dụ ```json { "job_id": ... } ```)
-    text = text.replace(/^```(?:json)?\s*\{[\s\S]*?\}\s*```\s*/im, '');
+    if (text.startsWith('```json') || text.startsWith('```JSON')) {
+      const endBlock = text.indexOf('```', 7);
+      if (endBlock !== -1) {
+        const potentialJson = text.slice(7, endBlock);
+        if (potentialJson.includes('"job_id"') || potentialJson.includes('"status"')) {
+          text = text.slice(endBlock + 3).trim();
+        }
+      }
+    }
 
-    // 3. Loại bỏ đối tượng JSON thô ở đầu văn bản (ví dụ { "job_id": ..., "status": ... })
-    text = text.replace(/^\s*\{\s*"(?:job_id|status|lesson_id|command|sender|receiver|message|payload|warnings|errors)"[\s\S]*?\}\s*/im, '');
+    // 3. Loại bỏ khối YAML frontmatter ở đầu (CHỈ KHI ở ngay đầu chuỗi và không chứa tiêu đề Markdown #)
+    if (text.startsWith('---')) {
+      const secondDivider = text.indexOf('\n---', 3);
+      if (secondDivider !== -1 && secondDivider < 500) {
+        const potentialYaml = text.slice(3, secondDivider);
+        // Kiểm tra xem có chứa tiêu đề Markdown # I. MỤC TIÊU không. Nếu có thì TUYỆT ĐỐI KHÔNG xóa!
+        if (!potentialYaml.includes('#') && (potentialYaml.includes('FORM_MODE') || potentialYaml.includes('lesson_id'))) {
+          text = text.slice(secondDivider + 4).trim();
+        }
+      }
+    }
 
-    // 4. Loại bỏ khối JSON generic ở đầu trước khi bắt đầu bằng tiêu đề #
-    text = text.replace(/^\s*\{[\s\S]*?\}\s*(?=\n\s*#)/m, '');
+    // 4. Loại bỏ khối code YAML ở đầu (ví dụ ```yaml FORM_MODE: ... ```)
+    if (text.startsWith('```yaml') || text.startsWith('```yml')) {
+      const endBlock = text.indexOf('```', 7);
+      if (endBlock !== -1) {
+        text = text.slice(endBlock + 3).trim();
+      }
+    }
 
-    // 5. Loại bỏ khối YAML frontmatter ở đầu (ví dụ --- ... --- hoặc ```yaml ... ```)
-    text = text.replace(/^---\s*\n[\s\S]*?\n---\s*/m, '');
-    text = text.replace(/^```(?:yaml)?\s*[\s\S]*?```\s*/im, '');
+    // 5. Loại bỏ đối tượng JSON thô ở đầu văn bản (ví dụ { "job_id": ..., "status": ... })
+    if (text.startsWith('{')) {
+      const firstHeading = text.indexOf('\n#');
+      const closeBrace = text.indexOf('}\n');
+      if (closeBrace !== -1 && (firstHeading === -1 || closeBrace < firstHeading)) {
+        const potentialJson = text.slice(0, closeBrace + 1);
+        if (potentialJson.includes('"job_id"') || potentialJson.includes('"status"')) {
+          text = text.slice(closeBrace + 2).trim();
+        }
+      }
+    }
 
     // 6. Loại bỏ các dòng lệnh metadata lặp lại (LỆNH THỰC THI: ..., MÃ BÀI HỌC: ...)
     text = text.replace(/^(?:LỆNH THỰC THI|MÃ BÀI HỌC|MÃ CÔNG VIỆC|JOB_ID|COMMAND):[^\n]*\n+/gim, '');
@@ -56,12 +87,10 @@ export class ContentNormalizer {
     }
 
     // 3. Chuẩn hóa khoảng trắng và dấu câu
-    // Giữ nguyên dòng mới, nhưng bỏ nhiều dòng trắng thừa liên tiếp (> 2 dòng trống)
     text = text.replace(/\r\n/g, '\n');
     text = text.replace(/\n{3,}/g, '\n\n');
 
     // 4. Chuẩn hóa khoảng trắng trước dấu câu (ngoài khối code/math)
-    // Ví dụ: 'abc .' -> 'abc.', 'abc ,' -> 'abc,'
     text = text.replace(/\s+([.,;:?!])(?=\s|$)/g, '$1');
 
     // 5. Loại bỏ các ký tự điều khiển không in được (trừ newline & tab)

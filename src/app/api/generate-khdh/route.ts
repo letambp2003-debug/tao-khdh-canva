@@ -165,7 +165,13 @@ export async function POST(request: NextRequest) {
           `Giáo viên thực hiện: ${env.TEACHER_NAME}`,
           '',
           '## HỢP ĐỒNG VÀ QUY TẮC BẮT BUỘC CHO CHẾ ĐỘ V11-2 KHÔNG TÁCH TIẾT:',
-          '1. Toàn bộ tiến trình dạy học tổ chức thống nhất thành đúng 4 phần lớn:',
+          '0. CẤU TRÚC BẮT BUỘC CỦA TOÀN BỘ BẢN KHDH (XUẤT ĐẦY ĐỦ TỪ ĐẦU ĐẾN CUỐI):',
+          '   - PHẦN ĐẦU KHDH (Trường, Tổ, Giáo viên, Tên bài, Môn, Lớp, Thời lượng, PPCT, Tuần)',
+          '   - # I. MỤC TIÊU (BẮT BUỘC CÓ: ## 1. Kiến thức, ## 2. Năng lực, ## 3. Phẩm chất)',
+          '   - # II. THIẾT BỊ DẠY HỌC VÀ HỌC LIỆU (## 1. Giáo viên, ## 2. Học sinh)',
+          '   - # III. TIẾN TRÌNH DẠY HỌC (Gồm 4 hoạt động A, B, C, D)',
+          '   - # IV. HƯỚNG DẪN VỀ NHÀ',
+          '1. Toàn bộ tiến trình dạy học (Phần III) tổ chức thống nhất thành đúng 4 phần lớn:',
           '   A. HOẠT ĐỘNG KHỞI ĐỘNG',
           '   B. HOẠT ĐỘNG HÌNH THÀNH KIẾN THỨC (Các Hoạt động 1, 2, ... nối tiếp nhau)',
           '   C. HOẠT ĐỘNG LUYỆN TẬP',
@@ -219,7 +225,7 @@ export async function POST(request: NextRequest) {
       lockedConfigSection,
       '',
       isContinuous4Section
-        ? 'Hãy thực thi lệnh và tạo bản Kế hoạch bài dạy hoàn chỉnh theo đúng FORM V11 4 PHẦN KHÔNG TÁCH TIẾT (A-B-C-D), bảng 2 cột, TikZ/Prompt ảnh ngay dưới nội dung, đầy đủ Mục IV Hướng dẫn về nhà và Mục V Bảng đánh giá 5 cột, tuân thủ nghiêm ngặt các căn cứ tài liệu nguồn.'
+        ? 'Hãy thực thi lệnh và tạo bản Kế hoạch bài dạy hoàn chỉnh theo đúng FORM V11-2 KHÔNG TÁCH TIẾT. BẮT BUỘC XUẤT ĐẦY ĐỦ TỪ: Phần đầu KHDH -> # I. MỤC TIÊU (1. Kiến thức, 2. Năng lực, 3. Phẩm chất) -> # II. THIẾT BỊ DẠY HỌC VÀ HỌC LIỆU -> # III. TIẾN TRÌNH DẠY HỌC (A, B, C, D bảng 2 cột kèm TikZ/Prompt ảnh) -> # IV. HƯỚNG DẪN VỀ NHÀ.'
         : 'Hãy thực thi lệnh và tạo bản Kế hoạch bài dạy hoàn chỉnh, chi tiết, đúng định dạng Tách tiết V10.1, tuân thủ nghiêm ngặt các căn cứ tài liệu nguồn và Cấu hình đã được cố định ở trên. Bắt đầu trực tiếp bằng # KẾ HOẠCH BÀI DẠY.',
     ].join('\n');
 
